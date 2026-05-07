@@ -20,3 +20,4 @@ Thumbs.db
 
 # Docker build context leftovers
 .dockerignore
+add_secret.py
