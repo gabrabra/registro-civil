@@ -50,8 +50,10 @@ services:
   frontend:
     build: ./frontend
     networks:
-      - easypanel
-      - easypanel-projetos-ia
+      easypanel:
+        aliases:
+          - projetos-ia_ia-registro-civil_frontend
+      easypanel-projetos-ia:
     deploy:
       restart_policy:
         condition: any
