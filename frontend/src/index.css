@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  body { @apply bg-slate-50 text-slate-800 antialiased; }
+}
+
+@layer components {
+  .field-low {
+    @apply border-red-400 bg-red-50 focus:ring-red-300 focus:border-red-500;
+  }
+  .field-medium {
+    @apply border-amber-400 bg-amber-50 focus:ring-amber-300 focus:border-amber-500;
+  }
+  .badge-alta   { @apply bg-green-100 text-green-800; }
+  .badge-media  { @apply bg-amber-100 text-amber-800; }
+  .badge-baixa  { @apply bg-red-100 text-red-800; }
+}
+
+/* Smooth fill animation for AI-extracted fields */
+@keyframes fillIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.field-filled { animation: fillIn 0.3s ease; }
+
+/* Drag-over highlight */
+.drag-over {
+  @apply border-blue-500 bg-blue-50;
+}

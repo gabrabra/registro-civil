@@ -1,0 +1,59 @@
+{
+  "name": "Transcrição Cartório - Dual Vision AI (Llama + Qwen2.5-VL)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "transcricao-cartorio",
+        "responseMode": "responseNode",
+        "options": { "binaryData": true }
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-000000000001",
+      "name": "Webhook - Recebe Imagem",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [120, 300],
+      "webhookId": "a1b2c3d4-e5f6-7890-abcd-000000000001"
+    },
+    {
+      "parameters": {
+        "jsCode": "/* Transcrição Cartório - Llama 3.2 Vision + Qwen2.5-VL\n   base64 fica em variável local apenas — nunca no JSON do item entre nós */\n\nconst RUNPOD_URL = 'https://6y0yvpxgoqoth8-11434.proxy.runpod.net/api/chat';\n\n// ── 1. Obter imagem ──────────────────────────────────────────────────────────\nconst item = $input.first();\nlet base64Image;\n\nif (item.binary && Object.keys(item.binary).length > 0) {\n  const key = Object.keys(item.binary)[0];\n  const buf = await this.helpers.getBinaryDataBuffer(0, key);\n  base64Image = buf.toString('base64');\n} else if (item.json?.image) {\n  base64Image = String(item.json.image).replace(/^data:image\\/[a-z]+;base64,/, '');\n} else {\n  throw new Error('Nenhuma imagem. Use form-data (campo \"image\") ou JSON {\"image\":\"base64...\"}');\n}\n\n// ── Helper: parsear resposta NDJSON do Ollama ────────────────────────────────\nfunction parseNDJSON(raw) {\n  let text = '';\n  if (typeof raw === 'string') {\n    for (const line of raw.split('\\n')) {\n      if (!line.trim()) continue;\n      try { text += JSON.parse(line)?.message?.content ?? ''; } catch(_) {}\n    }\n  } else if (raw?.message?.content) {\n    text = raw.message.content;\n  }\n  return text;\n}\n\nasync function ollamaChat(model, messages, temperature) {\n  let raw;\n  try {\n    raw = await this.helpers.httpRequest({\n      method: 'POST',\n      url: RUNPOD_URL,\n      body: { model, stream: true, keep_alive: -1, options: { temperature }, messages },\n      json: true,\n      timeout: 300000\n    });\n  } catch(httpErr) {\n    const data = httpErr?.response?.data ?? '';\n    if (typeof data === 'string' && data.includes('\"done\"')) {\n      raw = data;\n    } else {\n      throw new Error(`Ollama ${model} falhou: ${httpErr.message}`);\n    }\n  }\n  return parseNDJSON(raw);\n}\n\n// ── 2. Llama 3.2 Vision — rascunho ──────────────────────────────────────────\nconst llamaDraft = await ollamaChat.call(this,\n  'llama3.2-vision:latest',\n  [{\n    role: 'user',\n    content: 'Você é especialista em paleografia e registros civis brasileiros do século XX. ' +\n             'Transcreva este documento de registro de nascimento de cartório. ' +\n             'Extraia: nome do nascido, pai, mãe, data de nascimento, número do termo. ' +\n             'Leia a letra manuscrita cursiva ao máximo. Use [ilegível] só se impossível.',\n    images: [base64Image]\n  }],\n  0.1\n);\n\nconsole.log('Llama draft (200):', llamaDraft.substring(0, 200));\n\n// ── 3. Qwen2.5-VL — extração final ──────────────────────────────────────────\nconst prompt =\n  'Você é um especialista em paleografia e registros civis brasileiros do século XX.\\n\\n' +\n  'Analise esta imagem de registro de nascimento de cartório.\\n\\n' +\n  'Transcrição inicial de referência (use como guia, a imagem tem prioridade):\\n---\\n' +\n  llamaDraft + '\\n---\\n\\n' +\n  'Extraia os campos abaixo com máxima precisão lendo a letra manuscrita.\\n' +\n  'Responda SOMENTE com JSON válido, sem texto antes ou depois:\\n\\n' +\n  '{\\n' +\n  '  \"nome_nascido\": \"nome completo da pessoa nascida\",\\n' +\n  '  \"nome_pai\": \"nome completo do pai ou null\",\\n' +\n  '  \"nome_mae\": \"nome completo da mae ou null\",\\n' +\n  '  \"data_nascimento\": \"data como escrita no documento\",\\n' +\n  '  \"ano\": \"somente o ano ex: 1931\",\\n' +\n  '  \"numero_termo\": \"numero do Termo ou Assento\",\\n' +\n  '  \"municipio\": \"municipio ou null\",\\n' +\n  '  \"estado\": \"UF ex: PE ou null\",\\n' +\n  '  \"confianca\": \"alta|media|baixa\",\\n' +\n  '  \"observacoes\": \"campos duvidosos ou ilegíveis\"\\n' +\n  '}';\n\nconst qwenRaw = await ollamaChat.call(this,\n  'qwen2.5vl:7b',\n  [{ role: 'user', content: prompt, images: [base64Image] }],\n  0.05\n);\n\n// base64Image descartada aqui — variável local, GC pode limpar\nbase64Image = null;\n\nconsole.log('Qwen raw (300):', qwenRaw.substring(0, 300));\n\n// ── 4. Parsear JSON da resposta ──────────────────────────────────────────────\nconst cleaned = qwenRaw.replace(/```json\\n?|\\n?```/g, '').trim();\nlet result = {};\ntry {\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  result = match ? JSON.parse(match[0]) : { erro: 'JSON nao encontrado', raw: qwenRaw };\n} catch(e) {\n  result = { erro: e.message, raw: qwenRaw };\n}\n\nreturn [{\n  json: {\n    ...result,\n    _meta: {\n      model_rascunho: 'llama3.2-vision:latest',\n      model_final: 'qwen2.5vl:7b',\n      rascunho: llamaDraft,\n      processado_em: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-000000000002",
+      "name": "Transcrever com IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json, null, 2) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [{ "name": "Content-Type", "value": "application/json; charset=utf-8" }]
+          }
+        }
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-000000000005",
+      "name": "Resposta JSON",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [840, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Recebe Imagem": {
+      "main": [[{ "node": "Transcrever com IA", "type": "main", "index": 0 }]]
+    },
+    "Transcrever com IA": {
+      "main": [[{ "node": "Resposta JSON", "type": "main", "index": 0 }]]
+    }
+  },
+  "id": "TrCrtDualVisionAI",
+  "active": true,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": []
+}
