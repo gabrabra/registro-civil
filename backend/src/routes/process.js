@@ -4,7 +4,7 @@ const axios   = require('axios');
 const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
-const { ensurePodRunning, OLLAMA_BASE } = require('../utils/runpod');
+const { ensurePodRunning, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -59,6 +59,87 @@ const PROMPT =
   'Se houver apenas um registro, retorne um array com um único elemento.\n' +
   'Se não houver registros de nascimento visíveis, retorne um array vazio: []';
 
+const RECORD_FIELDS = [
+  'nome_completo', 'nome_mae', 'nome_pai',
+  'data_nascimento', 'ano', 'numero_termo',
+  'municipio', 'estado', 'observacoes',
+];
+
+// Call a single model and parse its registros[] response
+async function callModel(modelName, base64) {
+  let raw = '';
+  try {
+    const resp = await axios.post(`${OLLAMA_BASE}/api/chat`, {
+      model: modelName,
+      stream: true,
+      keep_alive: -1,
+      options: { temperature: 0.05 },
+      messages: [{ role: 'user', content: PROMPT, images: [base64] }]
+    }, { timeout: 300000, responseType: 'text' });
+    raw = resp.data;
+  } catch (err) {
+    const d = err?.response?.data ?? '';
+    if (typeof d === 'string' && d.includes('"done"')) raw = d;
+    else throw new Error(`${modelName}: ${err.message}`);
+  }
+
+  const content = parseNDJSON(raw).replace(/```json\n?|\n?```/g, '').trim();
+  try {
+    const arrMatch = content.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      const parsed = JSON.parse(arrMatch[0]);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    }
+    const objMatch = content.match(/\{[\s\S]*\}/);
+    if (objMatch) return [JSON.parse(objMatch[0])];
+  } catch (_) {}
+  return [];
+}
+
+// Pick the most frequent non-null value from a list
+function majorityValue(values) {
+  const valid = values.filter(v => v != null && String(v).trim() !== '' && String(v).toLowerCase() !== 'null');
+  if (!valid.length) return null;
+  const freq = {};
+  for (const v of valid) {
+    const k = String(v).toLowerCase().trim();
+    if (!freq[k]) freq[k] = { count: 0, value: v };
+    freq[k].count++;
+  }
+  return Object.values(freq).sort((a, b) => b.count - a.count)[0].value;
+}
+
+// Merge registros[] arrays from multiple models using majority vote per field
+function mergeResults(allRegistros) {
+  const successful = allRegistros.filter(r => r.length > 0);
+  if (!successful.length) return [];
+
+  // Majority vote on number of records in the image
+  const countFreq = {};
+  for (const r of successful) countFreq[r.length] = (countFreq[r.length] || 0) + 1;
+  const consensusCount = Number(Object.entries(countFreq).sort((a, b) => b[1] - a[1])[0][0]);
+
+  const merged = [];
+  for (let i = 0; i < consensusCount; i++) {
+    const rec = {};
+    for (const field of RECORD_FIELDS) {
+      rec[field] = majorityValue(successful.map(r => r[i]?.[field] ?? null));
+    }
+
+    // Confidence: fraction of fields where all models agreed
+    const populated = RECORD_FIELDS.filter(f => rec[f] != null);
+    const agreed = populated.filter(f => {
+      const vals = successful.map(r => String(r[i]?.[f] ?? '').toLowerCase().trim()).filter(v => v && v !== 'null');
+      return new Set(vals).size <= 1;
+    });
+    const ratio = populated.length ? agreed.length / populated.length : 0;
+    rec.confianca = ratio >= 0.8 ? 'alta' : ratio >= 0.5 ? 'media' : 'baixa';
+
+    merged.push(rec);
+  }
+  return merged;
+}
+
 router.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
@@ -77,44 +158,26 @@ router.post('/', upload.single('file'), async (req, res) => {
     arquivo_url:  `/files/${req.file.filename}`
   };
 
-  let raw = '';
-  try {
-    const resp = await axios.post(`${OLLAMA_BASE}/api/chat`, {
-      model: 'qwen2.5vl:7b',
-      stream: true,
-      keep_alive: -1,
-      options: { temperature: 0.05 },
-      messages: [{ role: 'user', content: PROMPT, images: [base64] }]
-    }, { timeout: 300000, responseType: 'text' });
-    raw = resp.data;
-  } catch (err) {
-    const d = err?.response?.data ?? '';
-    if (typeof d === 'string' && d.includes('"done"')) raw = d;
-    else {
-      console.error('Ollama error:', err.message);
-      return res.json({ registros: [], ...arquivoInfo, ai_error: true, observacoes: err.message });
+  // Call all models in parallel; collect results from whichever succeed
+  const results = await Promise.allSettled(
+    VISION_MODELS.map(model => callModel(model, base64))
+  );
+
+  const modelResults = results.map((r, i) => {
+    if (r.status === 'fulfilled') {
+      console.log(`[${VISION_MODELS[i]}] ${r.value.length} registro(s)`);
+      return r.value;
     }
-  }
+    console.warn(`[${VISION_MODELS[i]}] falhou:`, r.reason?.message);
+    return [];
+  });
 
-  const fullContent = parseNDJSON(raw);
-  console.log('Transcrição raw (200):', fullContent.substring(0, 300));
+  const registros = mergeResults(modelResults);
 
-  const cleaned = fullContent.replace(/```json\n?|\n?```/g, '').trim();
+  console.log(`Resultado final: ${registros.length} registro(s) (modelos OK: ${modelResults.filter(r => r.length > 0).length}/${VISION_MODELS.length})`);
 
-  let registros = [];
-  try {
-    const match = cleaned.match(/\[[\s\S]*\]/);
-    if (match) {
-      const parsed = JSON.parse(match[0]);
-      registros = Array.isArray(parsed) ? parsed : [parsed];
-    } else {
-      // fallback: maybe AI returned a single object
-      const objMatch = cleaned.match(/\{[\s\S]*\}/);
-      if (objMatch) registros = [JSON.parse(objMatch[0])];
-    }
-  } catch (_) {}
-
-  res.json({ registros, ...arquivoInfo });
+  const allFailed = modelResults.every(r => r.length === 0);
+  res.json({ registros, ...arquivoInfo, ...(allFailed ? { ai_error: true } : {}) });
 });
 
 module.exports = router;
