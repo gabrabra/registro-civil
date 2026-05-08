@@ -225,7 +225,7 @@ export default function NascimentosForm() {
       setFileUrl(data.arquivo_url || null);
       setAiDone(true);
       setToast(data.ai_error
-        ? { msg: 'IA retornou erro — preencha manualmente', type: 'error' }
+        ? { msg: `IA indisponível: ${data.ai_error_detail || 'Modelos falharam'} — preencha manualmente`, type: 'error' }
         : { msg: 'Dados extraídos! Revise e salve.', type: 'success' }
       );
     } catch (e) {

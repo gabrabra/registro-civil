@@ -32,12 +32,16 @@ export function BatchProvider({ children }) {
     processApi.file(item.file, livroIdRef.current || null)
       .then(data => {
         const registros = Array.isArray(data.registros) ? data.registros : [];
+        const hasAiError = data.ai_error && registros.length === 0;
         setItems(prev => prev.map((it, i) =>
           i === nextIdx ? {
             ...it,
-            status: 'done',
+            status: hasAiError ? 'error' : 'done',
             extracted: data,
             savedRecords: Array(registros.length).fill(false),
+            error: hasAiError
+              ? (data.ai_error_detail || 'IA indisponível — pods falharam')
+              : null,
           } : it
         ));
       })

@@ -5,7 +5,7 @@ const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
 const { pool } = require('../db');
-const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getAvailableModels, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
+const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getAvailableModels, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -211,8 +211,12 @@ router.post('/', upload.single('file'), async (req, res) => {
   const base64     = fs.readFileSync(filePath).toString('base64');
   const livroId    = req.body.livro_id || null;
 
+  console.log(`[process] Nova requisição — arquivo=${req.file.originalname} livro_id=${livroId}`);
+
+  let podError = null;
   try { await ensurePodRunning(); } catch (err) {
-    console.warn('ensurePodRunning falhou:', err.message);
+    podError = err.message;
+    console.warn('[process] ensurePodRunning falhou:', err.message);
   }
 
   const livro  = await getLivro(livroId);
@@ -241,21 +245,38 @@ router.post('/', upload.single('file'), async (req, res) => {
 
   const modelResults = results.map((r, i) => {
     if (r.status === 'fulfilled') {
-      console.log(`[${VISION_MODELS[i]}] ${r.value.length} registro(s)`);
+      console.log(`[${modelsToUse[i]}] ${r.value.length} registro(s)`);
       return r.value;
     }
-    console.warn(`[${VISION_MODELS[i]}] falhou:`, r.reason?.message);
+    console.warn(`[${modelsToUse[i]}] falhou:`, r.reason?.message);
     return [];
   });
 
   const merged    = mergeResults(modelResults);
   const registros = applyBookConstraints(merged, livro);
 
-  console.log(`Resultado final: ${registros.length} registro(s) (modelos OK: ${modelResults.filter(r => r.length > 0).length}/${VISION_MODELS.length})`);
+  console.log(`[process] Resultado final: ${registros.length} registro(s) (modelos OK: ${modelResults.filter(r => r.length > 0).length}/${modelsToUse.length})`);
 
   const allFailed = modelResults.every(r => r.length === 0);
   scheduleIdleStop();
-  res.json({ registros, ...arquivoInfo, ...(allFailed ? { ai_error: true } : {}) });
+  res.json({
+    registros,
+    ...arquivoInfo,
+    ...(allFailed ? { ai_error: true, ai_error_detail: podError || 'Todos os modelos falharam' } : {}),
+  });
+});
+
+// Debug endpoint — shows current config, pod state, and Ollama reachability
+router.get('/debug', async (_req, res) => {
+  const cfg = getPodConfig();
+  let pod = null, ollamaOk = false, models = [];
+  try { pod = await getPodStatus(); } catch (e) { pod = { error: e.message }; }
+  try {
+    const r = await require('axios').get(`${OLLAMA_BASE}/api/tags`, { timeout: 5000 });
+    ollamaOk = true;
+    models = (r.data?.models || []).map(m => m.name);
+  } catch (e) { ollamaOk = false; }
+  res.json({ config: cfg, pod, ollamaOk, models });
 });
 
 // Pod management endpoints

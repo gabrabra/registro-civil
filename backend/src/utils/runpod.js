@@ -1,9 +1,11 @@
 const axios = require('axios');
 
 const API_KEY  = process.env.RUNPOD_API_KEY  || '';
-const POD_ID   = process.env.RUNPOD_POD_ID   || '6y0yvpxgoqoth8';
+const POD_ID   = process.env.RUNPOD_POD_ID   || 'dezvj7io08xznw';
 const OLLAMA_BASE = process.env.RUNPOD_OLLAMA_URL ||
   `https://${POD_ID}-11434.proxy.runpod.net`;
+
+console.log(`[runpod] POD_ID="${POD_ID}" OLLAMA_BASE="${OLLAMA_BASE}" API_KEY=${API_KEY ? 'SET' : 'NOT SET'}`);
 
 const VISION_MODELS = ['qwen2.5vl:7b', 'minicpm-v', 'llama3.2-vision'];
 const IDLE_STOP_MS  = Number(process.env.RUNPOD_IDLE_STOP_MS) || 15 * 60 * 1000;
@@ -43,7 +45,9 @@ async function getPodStatus() {
 
 async function startPod() {
   const data = await gql(`mutation { podResume(input: {podId: "${POD_ID}", gpuCount: 1}) { id desiredStatus } }`);
-  return data.data?.podResume;
+  if (data.errors?.length) throw new Error('podResume falhou: ' + data.errors[0].message);
+  if (!data.data?.podResume) throw new Error('podResume retornou vazio — pod pode estar indisponível');
+  return data.data.podResume;
 }
 
 async function stopPod() {
@@ -121,4 +125,8 @@ async function ensurePodRunning() {
   ensureModels().catch(() => {});
 }
 
-module.exports = { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getAvailableModels, OLLAMA_BASE, VISION_MODELS };
+function getPodConfig() {
+  return { POD_ID, OLLAMA_BASE, API_KEY_SET: Boolean(API_KEY) };
+}
+
+module.exports = { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getAvailableModels, OLLAMA_BASE, VISION_MODELS };
