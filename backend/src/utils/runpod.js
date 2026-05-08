@@ -6,12 +6,25 @@ const OLLAMA_BASE = process.env.RUNPOD_OLLAMA_URL ||
   `https://${POD_ID}-11434.proxy.runpod.net`;
 
 const VISION_MODELS = ['qwen2.5vl:7b', 'minicpm-v', 'llama3.2-vision'];
-
-// Stop pod after this many ms of inactivity (default: 15 min)
-const IDLE_STOP_MS = Number(process.env.RUNPOD_IDLE_STOP_MS) || 15 * 60 * 1000;
+const IDLE_STOP_MS  = Number(process.env.RUNPOD_IDLE_STOP_MS) || 15 * 60 * 1000;
 
 const pulling = new Set();
-let idleTimer = null;
+let idleTimer  = null;
+
+// Cache of installed models — refreshed every 60 s
+let modelCache = { models: null, ts: 0 };
+
+async function getAvailableModels() {
+  if (modelCache.models && Date.now() - modelCache.ts < 60000) return modelCache.models;
+  try {
+    const r = await axios.get(`${OLLAMA_BASE}/api/tags`, { timeout: 5000 });
+    const models = (r.data?.models || []).map(m => m.name);
+    modelCache = { models, ts: Date.now() };
+    return models;
+  } catch {
+    return modelCache.models || [];
+  }
+}
 
 async function gql(query) {
   const r = await axios.post(
@@ -40,7 +53,6 @@ async function stopPod() {
   console.log('[runpod] Pod parado:', data.data?.podStop?.desiredStatus);
 }
 
-// Reset the idle stop timer on each completed request
 function scheduleIdleStop() {
   if (!API_KEY) return;
   if (idleTimer) clearTimeout(idleTimer);
@@ -64,21 +76,19 @@ async function ollamaReady(maxMs = 300000) {
 }
 
 async function ensureModels() {
-  let installed;
-  try {
-    const r = await axios.get(`${OLLAMA_BASE}/api/tags`, { timeout: 10000 });
-    installed = (r.data?.models || []).map(m => m.name);
-  } catch { return; }
-
+  const installed = await getAvailableModels();
   for (const model of VISION_MODELS) {
     if (pulling.has(model)) continue;
-    const base = model.split(':')[0];
+    const base  = model.split(':')[0];
     const found = installed.some(m => m === model || m.startsWith(base + ':'));
     if (!found) {
       pulling.add(model);
       console.log(`[runpod] Pulling ${model} em background...`);
       axios.post(`${OLLAMA_BASE}/api/pull`, { name: model, stream: false }, { timeout: 1800000 })
-        .then(() => console.log(`[runpod] ${model} pronto`))
+        .then(() => {
+          console.log(`[runpod] ${model} pronto`);
+          modelCache = { models: null, ts: 0 }; // invalidate cache
+        })
         .catch(e => console.error(`[runpod] Pull ${model} falhou:`, e.message))
         .finally(() => pulling.delete(model));
     }
@@ -95,7 +105,6 @@ async function ensurePodRunning() {
 
   const pod = await getPodStatus();
   if (!pod) throw new Error(`Pod ${POD_ID} não encontrado`);
-
   console.log(`[runpod] Pod status: ${pod.desiredStatus}`);
 
   if (pod.desiredStatus !== 'RUNNING') {
@@ -112,4 +121,4 @@ async function ensurePodRunning() {
   ensureModels().catch(() => {});
 }
 
-module.exports = { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, OLLAMA_BASE, VISION_MODELS };
+module.exports = { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getAvailableModels, OLLAMA_BASE, VISION_MODELS };

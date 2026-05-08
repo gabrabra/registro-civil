@@ -4,7 +4,7 @@ const axios   = require('axios');
 const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
-const { ensurePodRunning, scheduleIdleStop, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
+const { ensurePodRunning, scheduleIdleStop, getAvailableModels, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -103,8 +103,13 @@ function mergeCoverResults(objs) {
 router.post('/livro-capa', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhuma imagem enviada' });
 
-  const base64 = fs.readFileSync(req.file.path).toString('base64');
-  try { fs.unlinkSync(req.file.path); } catch (_) {}
+  // Keep the file — don't delete it
+  const base64      = fs.readFileSync(req.file.path).toString('base64');
+  const arquivoInfo = {
+    arquivo_capa_path: req.file.path,
+    arquivo_capa_nome: req.file.originalname,
+    arquivo_capa_url:  `/files/${req.file.filename}`,
+  };
 
   try {
     await ensurePodRunning();
@@ -112,21 +117,26 @@ router.post('/livro-capa', upload.single('file'), async (req, res) => {
     return res.status(503).json({ erro: 'Pod indisponível: ' + err.message });
   }
 
+  const installed   = await getAvailableModels();
+  const modelsToUse = VISION_MODELS.filter(m => {
+    const base = m.split(':')[0];
+    return installed.some(a => a === m || a.startsWith(base + ':'));
+  });
+  if (!modelsToUse.length) modelsToUse.push(VISION_MODELS[0]);
+  console.log(`[process-livro] Modelos disponíveis: ${modelsToUse.join(', ')}`);
+
   const results = await Promise.allSettled(
-    VISION_MODELS.map(model => callModelForCover(model, base64))
+    modelsToUse.map(model => callModelForCover(model, base64))
   );
 
   const objs = results.map((r, i) => {
-    if (r.status === 'fulfilled') {
-      console.log(`[${VISION_MODELS[i]}] capa OK`);
-      return r.value;
-    }
-    console.warn(`[${VISION_MODELS[i]}] capa falhou:`, r.reason?.message);
+    if (r.status === 'fulfilled') { console.log(`[${modelsToUse[i]}] capa OK`); return r.value; }
+    console.warn(`[${modelsToUse[i]}] capa falhou:`, r.reason?.message);
     return null;
   }).filter(Boolean);
 
   scheduleIdleStop();
-  res.json(mergeCoverResults(objs));
+  res.json({ ...mergeCoverResults(objs), ...arquivoInfo });
 });
 
 module.exports = router;

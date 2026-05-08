@@ -48,7 +48,7 @@ export const processApi = {
     if (livroId) form.append('livro_id', livroId);
     return http.post('/process', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 300000,
+      timeout: 600000, // 10 min: pod wake-up (up to 5 min) + inference
       onUploadProgress: onProgress
     }).then(r => r.data);
   }
@@ -60,7 +60,7 @@ export const processLivroApi = {
     form.append('file', file);
     return http.post('/process/livro-capa', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 180000
+      timeout: 600000
     }).then(r => r.data);
   }
 };

@@ -5,7 +5,7 @@ const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
 const { pool } = require('../db');
-const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
+const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getAvailableModels, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -225,8 +225,18 @@ router.post('/', upload.single('file'), async (req, res) => {
     arquivo_url:  `/files/${req.file.filename}`
   };
 
+  // Only call models that are currently installed in Ollama
+  const installed   = await getAvailableModels();
+  const modelsToUse = VISION_MODELS.filter(m => {
+    const base = m.split(':')[0];
+    return installed.some(a => a === m || a.startsWith(base + ':'));
+  });
+  // Always try the primary model even if the cache is empty
+  if (!modelsToUse.length) modelsToUse.push(VISION_MODELS[0]);
+  console.log(`[process] Modelos disponíveis: ${modelsToUse.join(', ')}`);
+
   const results = await Promise.allSettled(
-    VISION_MODELS.map(model => callModel(model, base64, prompt))
+    modelsToUse.map(model => callModel(model, base64, prompt))
   );
 
   const modelResults = results.map((r, i) => {

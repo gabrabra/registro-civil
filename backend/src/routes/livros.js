@@ -37,13 +37,15 @@ router.post('/', async (req, res) => {
   try {
     const f = req.body;
     const { rows } = await pool.query(
-      `INSERT INTO livros (numero, cartorio, cnpj, cns, termo_inicio, termo_fim, data_inicio, data_fim, municipio, estado, descricao)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      `INSERT INTO livros (numero, cartorio, cnpj, cns, termo_inicio, termo_fim, data_inicio, data_fim,
+         municipio, estado, descricao, arquivo_capa_path, arquivo_capa_nome, arquivo_capa_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [f.numero, f.cartorio, f.cnpj || null, f.cns || null,
        f.termo_inicio ? parseInt(f.termo_inicio) : null,
        f.termo_fim    ? parseInt(f.termo_fim)    : null,
        f.data_inicio  || null, f.data_fim || null,
-       f.municipio || null, f.estado || null, f.descricao || null]
+       f.municipio || null, f.estado || null, f.descricao || null,
+       f.arquivo_capa_path || null, f.arquivo_capa_nome || null, f.arquivo_capa_url || null]
     );
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -58,13 +60,15 @@ router.put('/:id', async (req, res) => {
     const { rows } = await pool.query(
       `UPDATE livros SET numero=$1, cartorio=$2, cnpj=$3, cns=$4,
          termo_inicio=$5, termo_fim=$6, data_inicio=$7, data_fim=$8,
-         municipio=$9, estado=$10, descricao=$11
-       WHERE id=$12 RETURNING *`,
+         municipio=$9, estado=$10, descricao=$11,
+         arquivo_capa_path=$12, arquivo_capa_nome=$13, arquivo_capa_url=$14
+       WHERE id=$15 RETURNING *`,
       [f.numero, f.cartorio, f.cnpj || null, f.cns || null,
        f.termo_inicio ? parseInt(f.termo_inicio) : null,
        f.termo_fim    ? parseInt(f.termo_fim)    : null,
        f.data_inicio  || null, f.data_fim || null,
        f.municipio || null, f.estado || null, f.descricao || null,
+       f.arquivo_capa_path || null, f.arquivo_capa_nome || null, f.arquivo_capa_url || null,
        req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });

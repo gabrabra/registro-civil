@@ -56,10 +56,13 @@ async function initDb() {
     )
   `);
 
-  // Migration: add livro_id to existing tables
+  // Migrations
   await pool.query(
     `ALTER TABLE registros_nascimento ADD COLUMN IF NOT EXISTS livro_id INTEGER REFERENCES livros(id) ON DELETE SET NULL`
   ).catch(() => {});
+  await pool.query(`ALTER TABLE livros ADD COLUMN IF NOT EXISTS arquivo_capa_path VARCHAR(1000)`).catch(() => {});
+  await pool.query(`ALTER TABLE livros ADD COLUMN IF NOT EXISTS arquivo_capa_nome VARCHAR(500)`).catch(() => {});
+  await pool.query(`ALTER TABLE livros ADD COLUMN IF NOT EXISTS arquivo_capa_url  VARCHAR(500)`).catch(() => {});
 
   // Seed admin user
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@registrocivil.com';

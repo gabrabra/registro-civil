@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Save, Loader2, X, Sparkles, Upload, CheckCircle, AlertCircle } from 'lucide-react';
+import { ChevronLeft, Save, Loader2, X, Sparkles, Upload, CheckCircle, AlertCircle, FileImage } from 'lucide-react';
 import { livrosApi, processLivroApi } from '../../api.js';
 
 const EMPTY = {
@@ -130,6 +130,7 @@ export default function LivrosForm() {
   const isEdit   = Boolean(id);
 
   const [form,        setForm]        = useState(EMPTY);
+  const [capaInfo,    setCapaInfo]    = useState(null); // {arquivo_capa_path, arquivo_capa_nome, arquivo_capa_url}
   const [saving,      setSaving]      = useState(false);
   const [toast,       setToast]       = useState(null);
   const [showReader,  setShowReader]  = useState(!isEdit);
@@ -150,6 +151,13 @@ export default function LivrosForm() {
         estado:       r.estado       || '',
         descricao:    r.descricao    || '',
       });
+      if (r.arquivo_capa_url) {
+        setCapaInfo({
+          arquivo_capa_path: r.arquivo_capa_path,
+          arquivo_capa_nome: r.arquivo_capa_nome,
+          arquivo_capa_url:  r.arquivo_capa_url,
+        });
+      }
     }).catch(() => setToast({ msg: 'Erro ao carregar livro', type: 'error' }));
   }, [id]);
 
@@ -172,14 +180,23 @@ export default function LivrosForm() {
       municipio:    data.municipio    || prev.municipio,
       estado:       data.estado       || prev.estado,
     }));
+    // Save the cover image info returned by the backend
+    if (data.arquivo_capa_url) {
+      setCapaInfo({
+        arquivo_capa_path: data.arquivo_capa_path,
+        arquivo_capa_nome: data.arquivo_capa_nome,
+        arquivo_capa_url:  data.arquivo_capa_url,
+      });
+    }
   }
 
   async function handleSave(e) {
     e.preventDefault();
     setSaving(true);
     try {
-      if (isEdit) await livrosApi.update(id, form);
-      else        await livrosApi.create(form);
+      const payload = { ...form, ...capaInfo };
+      if (isEdit) await livrosApi.update(id, payload);
+      else        await livrosApi.create(payload);
       navigate('/livros');
     } catch (err) {
       setToast({ msg: `Erro ao salvar: ${err.response?.data?.error || err.message}`, type: 'error' });
@@ -228,6 +245,18 @@ export default function LivrosForm() {
           {showReader && (
             <div className="px-5 pb-5 border-t border-slate-100 pt-4">
               <CoverReader onExtracted={handleExtracted} />
+            </div>
+          )}
+          {capaInfo?.arquivo_capa_url && (
+            <div className="px-5 pb-4 flex items-center gap-3 border-t border-slate-100 pt-3">
+              <img src={capaInfo.arquivo_capa_url} alt="capa" className="h-14 w-10 object-cover rounded border border-slate-200 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-500 truncate">{capaInfo.arquivo_capa_nome || 'Capa salva'}</p>
+                <a href={capaInfo.arquivo_capa_url} target="_blank" rel="noreferrer"
+                  className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-0.5">
+                  <FileImage className="w-3 h-3" /> Ver imagem completa
+                </a>
+              </div>
             </div>
           )}
         </div>
