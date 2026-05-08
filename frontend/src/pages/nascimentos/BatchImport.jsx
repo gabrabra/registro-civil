@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, ChevronLeft, Play, Trash2, CheckCircle, XCircle, Loader2, AlertTriangle, FileText, Save, X, BookOpen } from 'lucide-react';
+import {
+  Upload, ChevronLeft, Play, Trash2, CheckCircle, XCircle,
+  Loader2, AlertTriangle, FileText, Save, X, BookOpen, ChevronDown, ChevronUp,
+} from 'lucide-react';
 import { livrosApi } from '../../api.js';
 import { useBatch } from '../../context/BatchContext.jsx';
 
@@ -17,93 +20,105 @@ function StatusBadge({ status, error }) {
 
 function ConfBadge({ value }) {
   if (!value) return null;
-  const cls = value === 'alta' ? 'bg-green-100 text-green-700' : value === 'media' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
+  const cls = value === 'alta'
+    ? 'bg-green-100 text-green-700'
+    : value === 'media'
+      ? 'bg-amber-100 text-amber-700'
+      : 'bg-red-100 text-red-700';
   return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{value}</span>;
 }
 
-function ReviewCard({ item, index, onUpdate, onSave, saving }) {
-  const [editing, setEditing] = useState(false);
-  const [local,   setLocal]   = useState(item.extracted || {});
-  const d    = item.extracted || {};
-  const conf = d.confianca;
-
-  function set(e) { setLocal(l => ({ ...l, [e.target.name]: e.target.value })); }
-
-  function fieldCls() {
-    const base = 'text-sm w-full px-2 py-1.5 rounded border focus:outline-none';
-    if (conf === 'baixa') return `${base} border-red-400 bg-red-50`;
-    if (conf === 'media') return `${base} border-amber-400 bg-amber-50`;
-    return `${base} border-slate-300`;
-  }
-
-  if (!editing) return (
-    <div className={`rounded-xl border bg-white shadow-sm overflow-hidden ${item.saved ? 'border-green-300' : 'border-slate-200'}`}>
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-100">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
-          <span className="text-sm font-medium text-slate-700 truncate">{item.file.name}</span>
-          {item.saved && <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />}
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <ConfBadge value={conf} />
-          {!item.saved && (
-            <>
-              <button onClick={() => { setLocal(d); setEditing(true); }} className="text-xs text-slate-500 hover:text-blue-600 px-2 py-1 rounded hover:bg-blue-50 transition-colors">Editar</button>
-              <button onClick={() => onSave(index, d)} disabled={saving}
-                className="text-xs text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded transition-colors disabled:opacity-50">
-                {saving ? 'Salvando...' : 'Salvar'}
-              </button>
-            </>
-          )}
+function RecordSubCard({ reg, regIndex, totalRegs, saved, saving, onEdit, onSave }) {
+  return (
+    <div className={`px-4 py-3 ${saved ? 'bg-green-50' : ''}`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-slate-500">
+          Registro {regIndex + 1}{totalRegs > 1 ? ` de ${totalRegs}` : ''}
+        </span>
+        <div className="flex items-center gap-2">
+          <ConfBadge value={reg.confianca} />
+          {saved
+            ? <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Salvo</span>
+            : (
+              <>
+                <button onClick={onEdit}
+                  className="text-xs text-slate-500 hover:text-blue-600 px-2 py-1 rounded hover:bg-blue-50 transition-colors">
+                  Editar
+                </button>
+                <button onClick={onSave} disabled={saving}
+                  className="text-xs text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded transition-colors disabled:opacity-50">
+                  {saving ? 'Salvando...' : 'Salvar'}
+                </button>
+              </>
+            )}
         </div>
       </div>
-      <div className="px-4 py-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 text-sm">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1.5 text-sm">
         {[
-          ['Nome', d.nome_completo || d.nome_nascido],
-          ['Mãe', d.nome_mae], ['Pai', d.nome_pai],
-          ['Ano', d.ano], ['Termo', d.numero_termo],
-          ['Data Nasc.', d.data_nascimento],
-          ['Município', d.municipio], ['Estado', d.estado],
-        ].map(([label, val]) => val ? (
+          ['Nome',      reg.nome_completo || reg.nome_nascido],
+          ['Mãe',       reg.nome_mae],
+          ['Pai',       reg.nome_pai],
+          ['Ano',       reg.ano],
+          ['Termo',     reg.numero_termo],
+          ['Data Nasc.',reg.data_nascimento],
+          ['Município', reg.municipio],
+          ['Estado',    reg.estado],
+        ].map(([label, val]) => val != null && val !== '' ? (
           <div key={label}>
             <span className="text-xs text-slate-400">{label}: </span>
             <span className={`font-medium ${String(val).includes('ilegível') ? 'text-red-500' : 'text-slate-800'}`}>{val}</span>
           </div>
         ) : null)}
-        {conf === 'baixa' && (
+        {reg.confianca === 'baixa' && (
           <div className="col-span-full flex items-center gap-1 text-xs text-red-600 mt-1">
-            <AlertTriangle className="w-3 h-3" /> Confiança baixa — verifique os campos antes de salvar
+            <AlertTriangle className="w-3 h-3" /> Confiança baixa — verifique antes de salvar
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function EditSubCard({ reg, onApply, onCancel }) {
+  const [local, setLocal] = useState({ ...reg });
+  function set(e) { setLocal(l => ({ ...l, [e.target.name]: e.target.value })); }
+  const conf = local.confianca;
+  const fieldCls = `text-sm w-full px-2 py-1.5 rounded border focus:outline-none ${
+    conf === 'baixa' ? 'border-red-400 bg-red-50' :
+    conf === 'media' ? 'border-amber-400 bg-amber-50' : 'border-slate-300'
+  }`;
 
   return (
-    <div className="rounded-xl border border-blue-300 bg-white shadow-md">
-      <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-b border-blue-100">
-        <span className="text-sm font-medium text-blue-800">{item.file.name} — Editando</span>
-        <button onClick={() => { onUpdate(index, local); setEditing(false); }}
-          className="text-xs text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded transition-colors">
-          Aplicar
-        </button>
+    <div className="px-4 py-3 bg-blue-50 border-t border-blue-100">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-semibold text-blue-700">Editando registro</span>
+        <div className="flex gap-2">
+          <button onClick={onCancel}
+            className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded hover:bg-slate-100 transition-colors">
+            Cancelar
+          </button>
+          <button onClick={() => onApply(local)}
+            className="text-xs text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded transition-colors">
+            Aplicar
+          </button>
+        </div>
       </div>
-      <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          ['Nome Completo', 'nome_completo', 'col-span-2'],
-          ['Nome da Mãe',   'nome_mae',      'col-span-2'],
-          ['Nome do Pai',   'nome_pai',      'col-span-2'],
-          ['Ano',           'ano',           'col-span-1'],
-          ['Livro',         'livro',         'col-span-1'],
-          ['Folha',         'folha',         'col-span-1'],
-          ['Nº Termo',      'numero_termo',  'col-span-1'],
-          ['Data Nasc.',    'data_nascimento','col-span-1'],
-          ['Município',     'municipio',     'col-span-1'],
-          ['Estado',        'estado',        'col-span-1'],
+          ['Nome Completo',  'nome_completo',    'col-span-2'],
+          ['Nome da Mãe',    'nome_mae',         'col-span-2'],
+          ['Nome do Pai',    'nome_pai',         'col-span-2'],
+          ['Ano',            'ano',              'col-span-1'],
+          ['Livro',          'livro',            'col-span-1'],
+          ['Folha',          'folha',            'col-span-1'],
+          ['Nº Termo',       'numero_termo',     'col-span-1'],
+          ['Data Nasc.',     'data_nascimento',  'col-span-1'],
+          ['Município',      'municipio',        'col-span-1'],
+          ['Estado',         'estado',           'col-span-1'],
         ].map(([label, name, span]) => (
           <div key={name} className={span}>
             <label className="text-xs text-slate-500 block mb-1">{label}</label>
-            <input name={name} value={local[name] || ''} onChange={set} className={fieldCls()} />
+            <input name={name} value={local[name] || ''} onChange={set} className={fieldCls} />
           </div>
         ))}
         <div className="col-span-full">
@@ -116,18 +131,78 @@ function ReviewCard({ item, index, onUpdate, onSave, saving }) {
   );
 }
 
+function ReviewCard({ item, itemIndex, onSaveRecord, onUpdateRecord, savingKey }) {
+  const [editingReg, setEditingReg] = useState(null);
+  const registros   = item.extracted?.registros || [];
+  const savedCount  = item.savedRecords.filter(Boolean).length;
+  const allSaved    = registros.length > 0 && savedCount === registros.length;
+
+  if (registros.length === 0) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+          <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
+          <span className="text-sm font-medium text-slate-700 truncate">{item.file.name}</span>
+          <span className="text-xs text-slate-400 ml-2">Nenhum registro encontrado</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`rounded-xl border bg-white shadow-sm overflow-hidden ${allSaved ? 'border-green-300' : 'border-slate-200'}`}>
+      {/* File header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-100">
+        <div className="flex items-center gap-2 min-w-0">
+          <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
+          <span className="text-sm font-medium text-slate-700 truncate">{item.file.name}</span>
+        </div>
+        <span className={`text-xs font-medium flex-shrink-0 ${allSaved ? 'text-green-600' : 'text-slate-500'}`}>
+          {savedCount} de {registros.length} registro{registros.length !== 1 ? 's' : ''} salvo{savedCount !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* Per-registro rows */}
+      <div className="divide-y divide-slate-100">
+        {registros.map((reg, ri) => (
+          <div key={ri}>
+            {editingReg === ri
+              ? (
+                <EditSubCard
+                  reg={reg}
+                  onApply={newData => { onUpdateRecord(itemIndex, ri, newData); setEditingReg(null); }}
+                  onCancel={() => setEditingReg(null)}
+                />
+              ) : (
+                <RecordSubCard
+                  reg={reg}
+                  regIndex={ri}
+                  totalRegs={registros.length}
+                  saved={item.savedRecords[ri]}
+                  saving={savingKey === `${itemIndex}_${ri}`}
+                  onEdit={() => setEditingReg(ri)}
+                  onSave={() => onSaveRecord(itemIndex, ri)}
+                />
+              )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function BatchImport() {
   const navigate = useNavigate();
   const {
     items, livroId, setLivroId, isRunning,
-    addFiles, startProcessing, saveOne, updateItem, clearAll,
+    addFiles, startProcessing, saveOneRecord, updateRecord, clearAll,
     waitingCount, doneCount, unsavedCount, total,
   } = useBatch();
 
-  const [livros,     setLivros]     = useState([]);
-  const [drag,       setDrag]       = useState(false);
-  const [savingIdx,  setSavingIdx]  = useState(null);
-  const [toast,      setToast]      = useState(null);
+  const [livros,    setLivros]    = useState([]);
+  const [drag,      setDrag]      = useState(false);
+  const [savingKey, setSavingKey] = useState(null); // `${itemIdx}_${regIdx}`
+  const [toast,     setToast]     = useState(null);
   const fileInputRef = useRef();
 
   useEffect(() => { livrosApi.list().then(setLivros).catch(() => {}); }, []);
@@ -137,31 +212,35 @@ export default function BatchImport() {
     setTimeout(() => setToast(null), 4000);
   }
 
-  async function handleSaveOne(index, data) {
-    setSavingIdx(index);
+  async function handleSaveRecord(itemIdx, regIdx) {
+    const key = `${itemIdx}_${regIdx}`;
+    setSavingKey(key);
     try {
-      await saveOne(index, data);
+      await saveOneRecord(itemIdx, regIdx);
       showToast('Registro salvo!', 'success');
     } catch (e) {
       showToast(`Erro ao salvar: ${e.message}`, 'error');
     } finally {
-      setSavingIdx(null);
+      setSavingKey(null);
     }
   }
 
   async function handleSaveAll() {
+    let saved = 0;
     for (let i = 0; i < items.length; i++) {
-      if (items[i].status === 'done' && !items[i].saved) {
-        try { await saveOne(i, items[i].extracted); } catch (_) {}
+      if (items[i].status !== 'done') continue;
+      const registros = items[i].extracted?.registros || [];
+      for (let j = 0; j < registros.length; j++) {
+        if (!items[i].savedRecords[j]) {
+          try { await saveOneRecord(i, j); saved++; } catch (_) {}
+        }
       }
     }
-    showToast(`${unsavedCount} registros salvos!`, 'success');
+    showToast(`${saved} registro${saved !== 1 ? 's' : ''} salvo${saved !== 1 ? 's' : ''}!`, 'success');
   }
 
   const done     = items.filter(it => it.status === 'done');
   const hasItems = items.length > 0;
-
-  // Progress percentage
   const progress = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
   return (
@@ -177,7 +256,8 @@ export default function BatchImport() {
 
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => navigate('/nascimentos')} className="p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors">
+        <button onClick={() => navigate('/nascimentos')}
+          className="p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors">
           <ChevronLeft className="w-5 h-5" />
         </button>
         <div>
@@ -237,12 +317,12 @@ export default function BatchImport() {
                 <span className="text-xs text-green-600 font-medium">{doneCount} concluído{doneCount !== 1 ? 's' : ''}</span>
               )}
             </div>
-            <button onClick={clearAll} disabled={isRunning} className="text-xs text-slate-400 hover:text-red-500 transition-colors disabled:opacity-40">
+            <button onClick={clearAll} disabled={isRunning}
+              className="text-xs text-slate-400 hover:text-red-500 transition-colors disabled:opacity-40">
               Limpar tudo
             </button>
           </div>
 
-          {/* Progress bar */}
           {isRunning && (
             <div className="px-4 py-2 border-b border-slate-100">
               <div className="flex justify-between text-xs text-slate-500 mb-1">
@@ -256,26 +336,30 @@ export default function BatchImport() {
           )}
 
           <div className="divide-y divide-slate-100">
-            {items.map((item, i) => (
-              <div key={item.id} className={`flex items-center gap-3 px-4 py-2.5 ${item.status === 'processing' ? 'bg-blue-50' : ''}`}>
-                {/pdf/.test(item.file.type)
-                  ? <FileText className="w-8 h-8 text-slate-300 flex-shrink-0" />
-                  : <div className="w-8 h-8 rounded bg-slate-100 flex-shrink-0 overflow-hidden">
-                      <img src={URL.createObjectURL(item.file)} alt="" className="w-full h-full object-cover" />
-                    </div>
-                }
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-700 truncate">{item.file.name}</p>
-                  <p className="text-xs text-slate-400">{(item.file.size / 1024).toFixed(0)} KB</p>
+            {items.map((item, i) => {
+              const regCount = item.extracted?.registros?.length ?? 0;
+              const savedCount = item.savedRecords.filter(Boolean).length;
+              return (
+                <div key={item.id} className={`flex items-center gap-3 px-4 py-2.5 ${item.status === 'processing' ? 'bg-blue-50' : ''}`}>
+                  {/pdf/.test(item.file.type)
+                    ? <FileText className="w-8 h-8 text-slate-300 flex-shrink-0" />
+                    : <div className="w-8 h-8 rounded bg-slate-100 flex-shrink-0 overflow-hidden">
+                        <img src={URL.createObjectURL(item.file)} alt="" className="w-full h-full object-cover" />
+                      </div>
+                  }
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-slate-700 truncate">{item.file.name}</p>
+                    <p className="text-xs text-slate-400">{(item.file.size / 1024).toFixed(0)} KB
+                      {regCount > 0 && <span className="ml-2 text-slate-500">{regCount} registro{regCount !== 1 ? 's' : ''}</span>}
+                    </p>
+                  </div>
+                  <StatusBadge status={item.status} error={item.error} />
+                  {item.status === 'done' && regCount > 0 && savedCount === regCount && (
+                    <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                  )}
                 </div>
-                <StatusBadge status={item.status} error={item.error} />
-                {!isRunning && (item.status === 'waiting') && (
-                  <button onClick={() => {/* remove handled by clearAll */}} className="text-slate-300 hover:text-red-500 transition-colors">
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -307,14 +391,21 @@ export default function BatchImport() {
           <h2 className="text-base font-semibold text-slate-800 mb-3">
             Revisar e Salvar
             <span className="ml-2 text-sm font-normal text-slate-500">
-              {done.filter(it => it.saved).length} de {done.length} salvos
+              {done.reduce((a, it) => a + it.savedRecords.filter(Boolean).length, 0)} de{' '}
+              {done.reduce((a, it) => a + (it.extracted?.registros?.length || 0), 0)} registros salvos
             </span>
           </h2>
           <div className="space-y-3">
             {items.map((item, i) =>
               item.status === 'done' ? (
-                <ReviewCard key={item.id} item={item} index={i}
-                  onUpdate={updateItem} onSave={handleSaveOne} saving={savingIdx === i} />
+                <ReviewCard
+                  key={item.id}
+                  item={item}
+                  itemIndex={i}
+                  onSaveRecord={handleSaveRecord}
+                  onUpdateRecord={updateRecord}
+                  savingKey={savingKey}
+                />
               ) : null
             )}
           </div>

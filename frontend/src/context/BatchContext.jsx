@@ -4,21 +4,20 @@ import { processApi, nascimentosApi } from '../api.js';
 const BatchCtx = createContext(null);
 
 export function BatchProvider({ children }) {
-  const [items,     setItems]     = useState([]); // {id,file,status,extracted,saved,error}
+  const [items,     setItems]     = useState([]); // {id,file,status,extracted,savedRecords,error}
   const [livroId,   setLivroId]   = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const processingRef = useRef(false);
 
-  // Keep an up-to-date ref so the async callbacks can read current items
-  const itemsRef = useRef(items);
-  useEffect(() => { itemsRef.current = items; }, [items]);
+  const itemsRef  = useRef(items);
+  const livroIdRef = useRef(livroId);
+  useEffect(() => { itemsRef.current  = items;   }, [items]);
+  useEffect(() => { livroIdRef.current = livroId; }, [livroId]);
 
-  // Watch for queued items and process them one by one
   useEffect(() => {
     if (processingRef.current) return;
     const nextIdx = items.findIndex(it => it.status === 'queued');
     if (nextIdx === -1) {
-      // No more queued — check if we were running
       if (isRunning && !items.some(it => it.status === 'queued' || it.status === 'processing')) {
         setIsRunning(false);
       }
@@ -32,8 +31,14 @@ export function BatchProvider({ children }) {
 
     processApi.file(item.file)
       .then(data => {
+        const registros = Array.isArray(data.registros) ? data.registros : [];
         setItems(prev => prev.map((it, i) =>
-          i === nextIdx ? { ...it, status: 'done', extracted: data } : it
+          i === nextIdx ? {
+            ...it,
+            status: 'done',
+            extracted: data,
+            savedRecords: Array(registros.length).fill(false),
+          } : it
         ));
       })
       .catch(e => {
@@ -41,10 +46,7 @@ export function BatchProvider({ children }) {
           i === nextIdx ? { ...it, status: 'error', error: e.message } : it
         ));
       })
-      .finally(() => {
-        processingRef.current = false;
-        // Changing items will re-trigger this effect for the next queued item
-      });
+      .finally(() => { processingRef.current = false; });
   }, [items, isRunning]);
 
   function addFiles(files) {
@@ -54,60 +56,79 @@ export function BatchProvider({ children }) {
     if (!accepted.length) return;
     setItems(prev => [
       ...prev,
-      ...accepted.map(f => ({ id: `${Date.now()}_${Math.random()}`, file: f, status: 'waiting', extracted: null, saved: false, error: null }))
+      ...accepted.map(f => ({
+        id: `${Date.now()}_${Math.random()}`,
+        file: f,
+        status: 'waiting',
+        extracted: null,
+        savedRecords: [],
+        error: null,
+      }))
     ]);
   }
 
   function startProcessing() {
-    // Mark all 'waiting' items as 'queued' to trigger the effect
     setItems(prev => prev.map(it => it.status === 'waiting' ? { ...it, status: 'queued' } : it));
     setIsRunning(true);
   }
 
-  async function saveOne(idx, data) {
+  async function saveOneRecord(itemIdx, regIdx) {
+    const item = itemsRef.current[itemIdx];
+    const reg  = item.extracted.registros[regIdx];
     const payload = {
-      livro_id:        livroId || null,
-      nome_completo:   data.nome_completo || data.nome_nascido || null,
-      nome_mae:        data.nome_mae        || null,
-      nome_pai:        data.nome_pai        || null,
-      data_nascimento: data.data_nascimento || null,
-      ano:             data.ano             || null,
-      livro:           data.livro           || null,
-      folha:           data.folha           || null,
-      numero_termo:    data.numero_termo    || null,
-      municipio:       data.municipio       || null,
-      estado:          data.estado          || null,
-      confianca:       data.confianca       || null,
-      observacoes:     data.observacoes     || null,
-      arquivo_path:    data.arquivo_path    || null,
-      arquivo_nome:    data.arquivo_nome    || null,
-      arquivo_tipo:    data.arquivo_tipo    || null,
+      livro_id:        livroIdRef.current || null,
+      nome_completo:   reg.nome_completo   || reg.nome_nascido || null,
+      nome_mae:        reg.nome_mae        || null,
+      nome_pai:        reg.nome_pai        || null,
+      data_nascimento: reg.data_nascimento || null,
+      ano:             reg.ano             || null,
+      livro:           reg.livro           || null,
+      folha:           reg.folha           || null,
+      numero_termo:    reg.numero_termo    || null,
+      municipio:       reg.municipio       || null,
+      estado:          reg.estado          || null,
+      confianca:       reg.confianca       || null,
+      observacoes:     reg.observacoes     || null,
+      arquivo_path:    item.extracted.arquivo_path || null,
+      arquivo_nome:    item.extracted.arquivo_nome || null,
+      arquivo_tipo:    item.extracted.arquivo_tipo || null,
     };
     await nascimentosApi.create(payload);
-    setItems(prev => prev.map((it, i) => i === idx ? { ...it, saved: true } : it));
+    setItems(prev => prev.map((it, i) => {
+      if (i !== itemIdx) return it;
+      const savedRecords = [...it.savedRecords];
+      savedRecords[regIdx] = true;
+      return { ...it, savedRecords };
+    }));
   }
 
-  function updateItem(idx, newData) {
-    setItems(prev => prev.map((it, i) =>
-      i === idx ? { ...it, extracted: { ...it.extracted, ...newData } } : it
-    ));
+  function updateRecord(itemIdx, regIdx, newData) {
+    setItems(prev => prev.map((it, i) => {
+      if (i !== itemIdx) return it;
+      const registros = [...it.extracted.registros];
+      registros[regIdx] = { ...registros[regIdx], ...newData };
+      return { ...it, extracted: { ...it.extracted, registros } };
+    }));
   }
 
   function clearAll() {
-    if (isRunning) return; // don't clear while processing
+    if (isRunning) return;
     setItems([]);
     setLivroId('');
   }
 
-  const waitingCount    = items.filter(it => it.status === 'waiting').length;
-  const queuedCount     = items.filter(it => it.status === 'queued' || it.status === 'processing').length;
-  const doneCount       = items.filter(it => it.status === 'done' || it.status === 'error').length;
-  const unsavedCount    = items.filter(it => it.status === 'done' && !it.saved).length;
+  const waitingCount = items.filter(it => it.status === 'waiting').length;
+  const queuedCount  = items.filter(it => it.status === 'queued' || it.status === 'processing').length;
+  const doneCount    = items.filter(it => it.status === 'done' || it.status === 'error').length;
+  const unsavedCount = items.reduce((acc, it) => {
+    if (it.status !== 'done') return acc;
+    return acc + it.savedRecords.filter(s => !s).length;
+  }, 0);
 
   return (
     <BatchCtx.Provider value={{
       items, livroId, setLivroId, isRunning,
-      addFiles, startProcessing, saveOne, updateItem, clearAll,
+      addFiles, startProcessing, saveOneRecord, updateRecord, clearAll,
       waitingCount, queuedCount, doneCount, unsavedCount,
       total: items.length,
     }}>

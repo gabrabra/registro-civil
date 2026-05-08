@@ -135,7 +135,8 @@ export default function NascimentosForm() {
     try {
       setProcessMsg('IA processando... (pode levar 40–90 s)');
       const data = await processApi.file(file);
-      const conf = data.confianca || 'baixa';
+      const reg  = data.registros?.[0] || {};
+      const conf = reg.confianca || 'baixa';
       const perField = {};
       const sensitiveFields = ['nome_completo', 'nome_mae', 'nome_pai', 'numero_termo'];
       for (const f of Object.keys(EMPTY)) {
@@ -143,14 +144,13 @@ export default function NascimentosForm() {
       }
       const fillForm = {};
       for (const [k] of Object.entries(EMPTY)) {
-        const val = data[k] || '';
+        const val = reg[k] || '';
         fillForm[k] = val;
         if (!val || String(val).includes('ilegível') || String(val) === 'null') perField[k] = 'baixa';
       }
-      fillForm.nome_completo = data.nome_completo || data.nome_nascido || '';
-      fillForm.numero_termo  = data.numero_termo  || '';
-      fillForm.ano           = data.ano           ? String(data.ano) : '';
-      // Preserve livro_id selection
+      fillForm.nome_completo = reg.nome_completo || reg.nome_nascido || '';
+      fillForm.numero_termo  = reg.numero_termo  || '';
+      fillForm.ano           = reg.ano           ? String(reg.ano) : '';
       fillForm.livro_id = form.livro_id;
 
       setForm(prev => ({

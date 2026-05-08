@@ -40,20 +40,24 @@ function parseNDJSON(raw) {
 
 const PROMPT =
   'Você é especialista em leitura de documentos de cartório brasileiro.\n\n' +
-  'Analise esta imagem de registro de nascimento e extraia os dados visíveis.\n' +
-  'Responda SOMENTE com JSON válido, sem texto antes ou depois:\n\n' +
-  '{\n' +
-  '  "nome_completo": "nome completo do registrado",\n' +
-  '  "nome_mae": "nome da mãe ou null",\n' +
-  '  "nome_pai": "nome do pai ou null",\n' +
-  '  "data_nascimento": "data no formato YYYY-MM-DD ou null",\n' +
-  '  "ano": ano como número inteiro ou null,\n' +
-  '  "numero_termo": número inteiro do termo ou null,\n' +
-  '  "municipio": "nome do município ou null",\n' +
-  '  "estado": "sigla UF ex: PE ou null",\n' +
-  '  "confianca": "alta | media | baixa",\n' +
-  '  "observacoes": "dificuldades de leitura ou informações adicionais ou null"\n' +
-  '}';
+  'Analise esta imagem de livro de registro civil. Pode conter UM ou MAIS registros de nascimento na mesma página.\n\n' +
+  'Responda SOMENTE com um array JSON válido, um objeto por registro encontrado:\n\n' +
+  '[\n' +
+  '  {\n' +
+  '    "nome_completo": "nome completo do registrado",\n' +
+  '    "nome_mae": "nome da mãe ou null",\n' +
+  '    "nome_pai": "nome do pai ou null",\n' +
+  '    "data_nascimento": "YYYY-MM-DD ou null",\n' +
+  '    "ano": ano como número inteiro ou null,\n' +
+  '    "numero_termo": número inteiro do termo ou null,\n' +
+  '    "municipio": "nome do município ou null",\n' +
+  '    "estado": "sigla UF ex: PE ou null",\n' +
+  '    "confianca": "alta | media | baixa",\n' +
+  '    "observacoes": "dificuldades ou informações adicionais ou null"\n' +
+  '  }\n' +
+  ']\n\n' +
+  'Se houver apenas um registro, retorne um array com um único elemento.\n' +
+  'Se não houver registros de nascimento visíveis, retorne um array vazio: []';
 
 router.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
@@ -62,12 +66,16 @@ router.post('/', upload.single('file'), async (req, res) => {
   const fileBuffer = fs.readFileSync(filePath);
   const base64     = fileBuffer.toString('base64');
 
-  // Garante que o pod RunPod está acordado
-  try {
-    await ensurePodRunning();
-  } catch (err) {
+  try { await ensurePodRunning(); } catch (err) {
     console.warn('ensurePodRunning falhou:', err.message);
   }
+
+  const arquivoInfo = {
+    arquivo_path: filePath,
+    arquivo_nome: req.file.originalname,
+    arquivo_tipo: req.file.mimetype,
+    arquivo_url:  `/files/${req.file.filename}`
+  };
 
   let raw = '';
   try {
@@ -84,48 +92,29 @@ router.post('/', upload.single('file'), async (req, res) => {
     if (typeof d === 'string' && d.includes('"done"')) raw = d;
     else {
       console.error('Ollama error:', err.message);
-      return res.json({
-        nome_completo: null, nome_mae: null, nome_pai: null,
-        data_nascimento: null, ano: null, numero_termo: null,
-        municipio: null, estado: null, confianca: 'baixa',
-        observacoes: `Erro ao processar com IA: ${err.message}`,
-        arquivo_path: filePath,
-        arquivo_nome: req.file.originalname,
-        arquivo_tipo: req.file.mimetype,
-        arquivo_url:  `/files/${req.file.filename}`,
-        ai_error: true
-      });
+      return res.json({ registros: [], ...arquivoInfo, ai_error: true, observacoes: err.message });
     }
   }
 
   const fullContent = parseNDJSON(raw);
-  console.log('Transcrição raw (200):', fullContent.substring(0, 200));
+  console.log('Transcrição raw (200):', fullContent.substring(0, 300));
 
   const cleaned = fullContent.replace(/```json\n?|\n?```/g, '').trim();
-  let data = {};
-  try {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    data = match ? JSON.parse(match[0]) : {};
-  } catch (_) {
-    data = {};
-  }
 
-  res.json({
-    nome_completo:   data.nome_completo   || null,
-    nome_mae:        data.nome_mae        || null,
-    nome_pai:        data.nome_pai        || null,
-    data_nascimento: data.data_nascimento || null,
-    ano:             data.ano             || null,
-    numero_termo:    data.numero_termo    || null,
-    municipio:       data.municipio       || null,
-    estado:          data.estado          || null,
-    confianca:       data.confianca       || 'baixa',
-    observacoes:     data.observacoes     || null,
-    arquivo_path:    filePath,
-    arquivo_nome:    req.file.originalname,
-    arquivo_tipo:    req.file.mimetype,
-    arquivo_url:     `/files/${req.file.filename}`
-  });
+  let registros = [];
+  try {
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      registros = Array.isArray(parsed) ? parsed : [parsed];
+    } else {
+      // fallback: maybe AI returned a single object
+      const objMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (objMatch) registros = [JSON.parse(objMatch[0])];
+    }
+  } catch (_) {}
+
+  res.json({ registros, ...arquivoInfo });
 });
 
 module.exports = router;
