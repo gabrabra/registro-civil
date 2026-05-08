@@ -1,5 +1,13 @@
-const sharp = require('sharp');
 const axios = require('axios');
+
+// sharp is optional — if not installed, segmentation is disabled (full image fallback)
+let sharp = null;
+try {
+  sharp = require('sharp');
+  console.log('[segment] sharp disponível — segmentação de imagens ativa');
+} catch (e) {
+  console.warn('[segment] sharp não disponível — segmentação desabilitada:', e.message);
+}
 
 const COUNT_PROMPT =
   'Quantos registros de nascimento separados e COMPLETOS existem nesta imagem?\n' +
@@ -8,6 +16,8 @@ const COUNT_PROMPT =
   'Responda SOMENTE com um único dígito: 1, 2, 3 ou 4.';
 
 async function detectRecordCount(imageBuffer, modelName, ollamaBase) {
+  if (!sharp) return 1; // segmentation unavailable
+
   try {
     const small = await sharp(imageBuffer)
       .resize(900, 900, { fit: 'inside', withoutEnlargement: true })
@@ -35,12 +45,12 @@ async function detectRecordCount(imageBuffer, modelName, ollamaBase) {
 }
 
 async function splitImage(imageBuffer, count) {
-  if (count <= 1) return [imageBuffer];
+  if (!sharp || count <= 1) return [imageBuffer];
 
   const { width: w, height: h } = await sharp(imageBuffer).metadata();
 
   let rows, cols;
-  if (count >= 4)     { rows = 2; cols = 2; }
+  if (count >= 4)       { rows = 2; cols = 2; }
   else if (count === 3) { rows = (w > h) ? 1 : 3; cols = (w > h) ? 3 : 1; }
   else                  { rows = (w > h) ? 1 : 2; cols = (w > h) ? 2 : 1; }
 
