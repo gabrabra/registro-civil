@@ -4,6 +4,7 @@ const axios   = require('axios');
 const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
+const { pool } = require('../db');
 const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
 const router  = express.Router();
 
@@ -38,7 +39,7 @@ function parseNDJSON(raw) {
   return text;
 }
 
-const PROMPT =
+const BASE_PROMPT =
   'Você é especialista em leitura de documentos de cartório brasileiro.\n\n' +
   'Analise esta imagem de livro de registro civil. Pode conter UM ou MAIS registros de nascimento na mesma página.\n\n' +
   'Responda SOMENTE com um array JSON válido, um objeto por registro encontrado:\n\n' +
@@ -59,14 +60,83 @@ const PROMPT =
   'Se houver apenas um registro, retorne um array com um único elemento.\n' +
   'Se não houver registros de nascimento visíveis, retorne um array vazio: []';
 
+function buildPrompt(livro) {
+  if (!livro) return BASE_PROMPT;
+
+  const yearStart = livro.data_inicio ? new Date(livro.data_inicio).getFullYear() : null;
+  const yearEnd   = livro.data_fim    ? new Date(livro.data_fim).getFullYear()    : null;
+  const yearRange = yearStart || yearEnd
+    ? `${yearStart ?? '?'} a ${yearEnd ?? '?'}`
+    : null;
+
+  let ctx = '\n\nCONTEXTO DO LIVRO (dados verificados — use para corrigir sua leitura):';
+  ctx += `\n- Número do Livro: ${livro.numero}`;
+  if (livro.cartorio)  ctx += `\n- Cartório: ${livro.cartorio}`;
+  if (livro.municipio) ctx += `\n- Município: ${livro.municipio}`;
+  if (livro.estado)    ctx += `\n- Estado: ${livro.estado}`;
+  if (yearRange)       ctx += `\n- Período do livro: ${yearRange}`;
+  if (livro.termo_inicio && livro.termo_fim)
+    ctx += `\n- Termos: ${livro.termo_inicio} a ${livro.termo_fim}`;
+
+  if (yearRange) {
+    ctx += `\n\nATENÇÃO: O campo "ano" de cada registro DEVE estar entre ${yearStart ?? '?'} e ${yearEnd ?? '?'}.`;
+    ctx += ` Se você encontrar um ano fora deste intervalo, você cometeu um erro de leitura — releia com mais cuidado.`;
+  }
+  if (livro.municipio)
+    ctx += `\n"municipio" deve ser "${livro.municipio}" e "estado" deve ser "${livro.estado || '?'}" conforme o livro.`;
+
+  return BASE_PROMPT + ctx;
+}
+
+async function getLivro(livroId) {
+  if (!livroId) return null;
+  try {
+    const { rows } = await pool.query('SELECT * FROM livros WHERE id = $1', [livroId]);
+    return rows[0] || null;
+  } catch { return null; }
+}
+
+function applyBookConstraints(registros, livro) {
+  if (!livro) return registros;
+
+  const yearStart = livro.data_inicio ? new Date(livro.data_inicio).getFullYear() : null;
+  const yearEnd   = livro.data_fim    ? new Date(livro.data_fim).getFullYear()    : null;
+
+  return registros.map(reg => {
+    const r = { ...reg };
+
+    // Book is authoritative for these fields
+    r.livro = livro.numero;
+    if (livro.municipio) r.municipio = livro.municipio;
+    if (livro.estado)    r.estado    = livro.estado;
+
+    // Clamp registration year to book's date range
+    if (r.ano != null) {
+      const ano = parseInt(r.ano);
+      if (!isNaN(ano)) {
+        let clamped = ano;
+        if (yearStart && clamped < yearStart) clamped = yearStart;
+        if (yearEnd   && clamped > yearEnd)   clamped = yearEnd;
+        if (clamped !== ano) {
+          r.ano = clamped;
+          r.confianca = 'baixa';
+          r.observacoes = [r.observacoes, `Ano corrigido de ${ano} para ${clamped} (fora do período do livro)`]
+            .filter(Boolean).join(' | ');
+        }
+      }
+    }
+
+    return r;
+  });
+}
+
 const RECORD_FIELDS = [
   'nome_completo', 'nome_mae', 'nome_pai',
   'data_nascimento', 'ano', 'numero_termo',
   'municipio', 'estado', 'observacoes',
 ];
 
-// Call a single model and parse its registros[] response
-async function callModel(modelName, base64) {
+async function callModel(modelName, base64, prompt) {
   let raw = '';
   try {
     const resp = await axios.post(`${OLLAMA_BASE}/api/chat`, {
@@ -74,7 +144,7 @@ async function callModel(modelName, base64) {
       stream: true,
       keep_alive: -1,
       options: { temperature: 0.05 },
-      messages: [{ role: 'user', content: PROMPT, images: [base64] }]
+      messages: [{ role: 'user', content: prompt, images: [base64] }]
     }, { timeout: 300000, responseType: 'text' });
     raw = resp.data;
   } catch (err) {
@@ -96,7 +166,6 @@ async function callModel(modelName, base64) {
   return [];
 }
 
-// Pick the most frequent non-null value from a list
 function majorityValue(values) {
   const valid = values.filter(v => v != null && String(v).trim() !== '' && String(v).toLowerCase() !== 'null');
   if (!valid.length) return null;
@@ -109,12 +178,10 @@ function majorityValue(values) {
   return Object.values(freq).sort((a, b) => b.count - a.count)[0].value;
 }
 
-// Merge registros[] arrays from multiple models using majority vote per field
 function mergeResults(allRegistros) {
   const successful = allRegistros.filter(r => r.length > 0);
   if (!successful.length) return [];
 
-  // Majority vote on number of records in the image
   const countFreq = {};
   for (const r of successful) countFreq[r.length] = (countFreq[r.length] || 0) + 1;
   const consensusCount = Number(Object.entries(countFreq).sort((a, b) => b[1] - a[1])[0][0]);
@@ -125,8 +192,6 @@ function mergeResults(allRegistros) {
     for (const field of RECORD_FIELDS) {
       rec[field] = majorityValue(successful.map(r => r[i]?.[field] ?? null));
     }
-
-    // Confidence: fraction of fields where all models agreed
     const populated = RECORD_FIELDS.filter(f => rec[f] != null);
     const agreed = populated.filter(f => {
       const vals = successful.map(r => String(r[i]?.[f] ?? '').toLowerCase().trim()).filter(v => v && v !== 'null');
@@ -134,7 +199,6 @@ function mergeResults(allRegistros) {
     });
     const ratio = populated.length ? agreed.length / populated.length : 0;
     rec.confianca = ratio >= 0.8 ? 'alta' : ratio >= 0.5 ? 'media' : 'baixa';
-
     merged.push(rec);
   }
   return merged;
@@ -144,12 +208,15 @@ router.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
   const filePath   = req.file.path;
-  const fileBuffer = fs.readFileSync(filePath);
-  const base64     = fileBuffer.toString('base64');
+  const base64     = fs.readFileSync(filePath).toString('base64');
+  const livroId    = req.body.livro_id || null;
 
   try { await ensurePodRunning(); } catch (err) {
     console.warn('ensurePodRunning falhou:', err.message);
   }
+
+  const livro  = await getLivro(livroId);
+  const prompt = buildPrompt(livro);
 
   const arquivoInfo = {
     arquivo_path: filePath,
@@ -158,9 +225,8 @@ router.post('/', upload.single('file'), async (req, res) => {
     arquivo_url:  `/files/${req.file.filename}`
   };
 
-  // Call all models in parallel; collect results from whichever succeed
   const results = await Promise.allSettled(
-    VISION_MODELS.map(model => callModel(model, base64))
+    VISION_MODELS.map(model => callModel(model, base64, prompt))
   );
 
   const modelResults = results.map((r, i) => {
@@ -172,7 +238,8 @@ router.post('/', upload.single('file'), async (req, res) => {
     return [];
   });
 
-  const registros = mergeResults(modelResults);
+  const merged    = mergeResults(modelResults);
+  const registros = applyBookConstraints(merged, livro);
 
   console.log(`Resultado final: ${registros.length} registro(s) (modelos OK: ${modelResults.filter(r => r.length > 0).length}/${VISION_MODELS.length})`);
 

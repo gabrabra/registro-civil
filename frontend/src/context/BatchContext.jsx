@@ -29,7 +29,7 @@ export function BatchProvider({ children }) {
 
     setItems(prev => prev.map((it, i) => i === nextIdx ? { ...it, status: 'processing' } : it));
 
-    processApi.file(item.file)
+    processApi.file(item.file, livroIdRef.current || null)
       .then(data => {
         const registros = Array.isArray(data.registros) ? data.registros : [];
         setItems(prev => prev.map((it, i) =>

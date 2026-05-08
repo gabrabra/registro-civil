@@ -42,9 +42,10 @@ export const nascimentosApi = {
 };
 
 export const processApi = {
-  file: (file, onProgress) => {
+  file: (file, livroId, onProgress) => {
     const form = new FormData();
     form.append('file', file);
+    if (livroId) form.append('livro_id', livroId);
     return http.post('/process', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 300000,

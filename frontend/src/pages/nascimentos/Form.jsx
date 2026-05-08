@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Upload, Sparkles, AlertTriangle, CheckCircle, ChevronLeft, Save, Loader2, FileText, X, BookOpen } from 'lucide-react';
+import { Upload, Sparkles, AlertTriangle, CheckCircle, ChevronLeft, Save, Loader2, FileText, X, BookOpen, Lock } from 'lucide-react';
 import { nascimentosApi, processApi, livrosApi } from '../../api.js';
 
 const EMPTY = {
@@ -33,6 +33,22 @@ function Field({ label, name, value, onChange, confidence, error, type = 'text',
       {isLow && <p className="flex items-center gap-1 mt-1 text-xs text-red-600"><AlertTriangle className="w-3 h-3" /> Confiança baixa — verifique este campo</p>}
       {isMed && <p className="flex items-center gap-1 mt-1 text-xs text-amber-600"><AlertTriangle className="w-3 h-3" /> Confiança média — confirme o valor</p>}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+// Read-only field showing a value inherited from the book
+function LockedField({ label, value, hint }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-1 flex items-center gap-1">
+        {label}
+        <Lock className="w-3 h-3 text-slate-400" />
+      </label>
+      <div className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-700 flex items-center justify-between gap-2">
+        <span>{value || '—'}</span>
+        {hint && <span className="text-xs text-slate-400 flex-shrink-0">{hint}</span>}
+      </div>
     </div>
   );
 }
@@ -96,9 +112,29 @@ export default function NascimentosForm() {
   const [toast,      setToast]      = useState(null);
   const [aiDone,     setAiDone]     = useState(false);
 
+  // Derived: the book linked to this registro
+  const selectedLivro = livros.find(l => String(l.id) === String(form.livro_id)) || null;
+
+  // Book-derived year range for hints
+  const bookYearStart = selectedLivro?.data_inicio ? new Date(selectedLivro.data_inicio).getFullYear() : null;
+  const bookYearEnd   = selectedLivro?.data_fim    ? new Date(selectedLivro.data_fim).getFullYear()    : null;
+  const bookYearHint  = bookYearStart || bookYearEnd
+    ? `${bookYearStart ?? '?'}–${bookYearEnd ?? '?'}`
+    : null;
+
+  useEffect(() => { livrosApi.list().then(setLivros).catch(() => {}); }, []);
+
+  // When livro_id changes, sync locked fields from the book
   useEffect(() => {
-    livrosApi.list().then(setLivros).catch(() => {});
-  }, []);
+    if (!selectedLivro) return;
+    setForm(f => ({
+      ...f,
+      livro:     selectedLivro.numero    || f.livro,
+      municipio: selectedLivro.municipio || f.municipio,
+      estado:    selectedLivro.estado    || f.estado,
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.livro_id]);
 
   useEffect(() => {
     if (!isEdit) return;
@@ -127,14 +163,28 @@ export default function NascimentosForm() {
     setErrors(er => ({ ...er, [name]: '' }));
   }
 
+  // Handle livro_id change — also resets confidence for locked fields
+  function handleLivroChange(e) {
+    const livroId = e.target.value;
+    const livro = livros.find(l => String(l.id) === livroId) || null;
+    setForm(f => ({
+      ...f,
+      livro_id:  livroId,
+      livro:     livro?.numero    || f.livro,
+      municipio: livro?.municipio || (livroId ? '' : f.municipio),
+      estado:    livro?.estado    || (livroId ? '' : f.estado),
+    }));
+    setConfidence(c => ({ ...c, livro: undefined, municipio: undefined, estado: undefined }));
+  }
+
   async function handleProcess() {
     if (!file) return;
     setProcessing(true);
     setAiDone(false);
-    setProcessMsg('Enviando documento...');
+    setProcessMsg('IA processando... (pode levar 40–90 s)');
     try {
-      setProcessMsg('IA processando... (pode levar 40–90 s)');
-      const data = await processApi.file(file);
+      // Pass livro_id so backend injects book context into the prompt
+      const data = await processApi.file(file, form.livro_id || null);
       const reg  = data.registros?.[0] || {};
       const conf = reg.confianca || 'baixa';
       const perField = {};
@@ -151,7 +201,17 @@ export default function NascimentosForm() {
       fillForm.nome_completo = reg.nome_completo || reg.nome_nascido || '';
       fillForm.numero_termo  = reg.numero_termo  || '';
       fillForm.ano           = reg.ano           ? String(reg.ano) : '';
+      // Always keep the livro_id the user selected
       fillForm.livro_id = form.livro_id;
+      // Backend already applied book overrides; keep them regardless of confidence
+      if (selectedLivro) {
+        fillForm.livro     = reg.livro     || selectedLivro.numero    || '';
+        fillForm.municipio = reg.municipio || selectedLivro.municipio || '';
+        fillForm.estado    = reg.estado    || selectedLivro.estado    || '';
+        perField.livro     = 'alta';
+        perField.municipio = selectedLivro.municipio ? 'alta' : perField.municipio;
+        perField.estado    = selectedLivro.estado    ? 'alta' : perField.estado;
+      }
 
       setForm(prev => ({
         ...prev,
@@ -246,7 +306,7 @@ export default function NascimentosForm() {
           <select
             name="livro_id"
             value={form.livro_id}
-            onChange={set}
+            onChange={handleLivroChange}
             className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 transition-colors bg-white"
           >
             <option value="">— Sem vínculo com livro —</option>
@@ -256,6 +316,13 @@ export default function NascimentosForm() {
               </option>
             ))}
           </select>
+          {selectedLivro && (
+            <p className="mt-2 text-xs text-blue-600 flex items-center gap-1">
+              <Lock className="w-3 h-3" />
+              Livro, município, estado e ano serão validados pelo contexto deste livro
+              {bookYearHint && ` (${bookYearHint})`}
+            </p>
+          )}
         </div>
 
         {/* File Upload */}
@@ -267,7 +334,7 @@ export default function NascimentosForm() {
               <button type="button" onClick={handleProcess}
                 className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors">
                 <Sparkles className="w-4 h-4" />
-                Transcrever com IA
+                Transcrever com IA{selectedLivro ? ` (Livro ${selectedLivro.numero})` : ''}
               </button>
             )}
             {processing && (
@@ -275,7 +342,7 @@ export default function NascimentosForm() {
                 <Loader2 className="w-5 h-5 text-violet-600 animate-spin flex-shrink-0" />
                 <div>
                   <p className="text-sm font-medium text-violet-800">{processMsg}</p>
-                  <p className="text-xs text-violet-600 mt-0.5">Aguarde — modelos de IA analisando o documento</p>
+                  <p className="text-xs text-violet-600 mt-0.5">Aguarde — 3 modelos de IA analisando o documento</p>
                 </div>
               </div>
             )}
@@ -302,8 +369,27 @@ export default function NascimentosForm() {
           <h2 className="text-sm font-semibold text-slate-700 border-b border-slate-100 pb-2">Dados do Registro</h2>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Field label="Ano" name="ano" value={form.ano} onChange={set} confidence={confidence} error={errors.ano} required />
-            <Field label="Livro" name="livro" value={form.livro} onChange={set} confidence={confidence} />
+            <div>
+              <Field
+                label="Ano"
+                name="ano"
+                value={form.ano}
+                onChange={set}
+                confidence={confidence}
+                error={errors.ano}
+                required
+              />
+              {bookYearHint && (
+                <p className="text-xs text-slate-400 mt-1">Período do livro: {bookYearHint}</p>
+              )}
+            </div>
+
+            {/* Livro: hidden when book is selected (auto-filled) */}
+            {selectedLivro
+              ? <LockedField label="Livro" value={form.livro} hint="do livro" />
+              : <Field label="Livro" name="livro" value={form.livro} onChange={set} confidence={confidence} />
+            }
+
             <Field label="Folha" name="folha" value={form.folha} onChange={set} confidence={confidence} />
             <Field label="Nº do Termo" name="numero_termo" value={form.numero_termo} onChange={set} confidence={confidence} />
           </div>
@@ -314,8 +400,18 @@ export default function NascimentosForm() {
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <Field label="Data de Nascimento" name="data_nascimento" value={form.data_nascimento} onChange={set} confidence={confidence} />
-            <Field label="Município" name="municipio" value={form.municipio} onChange={set} confidence={confidence} />
-            <Field label="Estado (UF)" name="estado" value={form.estado} onChange={set} confidence={confidence} />
+
+            {/* Município: locked if book provides it */}
+            {selectedLivro?.municipio
+              ? <LockedField label="Município" value={form.municipio} hint="do livro" />
+              : <Field label="Município" name="municipio" value={form.municipio} onChange={set} confidence={confidence} />
+            }
+
+            {/* Estado: locked if book provides it */}
+            {selectedLivro?.estado
+              ? <LockedField label="Estado (UF)" value={form.estado} hint="do livro" />
+              : <Field label="Estado (UF)" name="estado" value={form.estado} onChange={set} confidence={confidence} />
+            }
           </div>
 
           <Field label="Observações" name="observacoes" value={form.observacoes} onChange={set} confidence={confidence} textarea />
