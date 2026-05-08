@@ -6,6 +6,7 @@ const fs      = require('fs');
 const { v4: uuid } = require('uuid');
 const { pool } = require('../db');
 const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getAvailableModels, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
+const { detectRecordCount, splitImage } = require('../utils/imageSegment');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -207,11 +208,12 @@ function mergeResults(allRegistros) {
 router.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
-  const filePath   = req.file.path;
-  const base64     = fs.readFileSync(filePath).toString('base64');
-  const livroId    = req.body.livro_id || null;
+  const filePath    = req.file.path;
+  const imageBuffer = fs.readFileSync(filePath);
+  const livroId     = req.body.livro_id || null;
+  const isImage     = /image\/(jpeg|png|webp|tiff)/.test(req.file.mimetype);
 
-  console.log(`[process] Nova requisição — arquivo=${req.file.originalname} livro_id=${livroId}`);
+  console.log(`[process] Nova requisição — arquivo=${req.file.originalname} livro_id=${livroId} isImage=${isImage}`);
 
   let podError = null;
   try { await ensurePodRunning(); } catch (err) {
@@ -229,40 +231,67 @@ router.post('/', upload.single('file'), async (req, res) => {
     arquivo_url:  `/files/${req.file.filename}`
   };
 
-  // Only call models that are currently installed in Ollama
   const installed   = await getAvailableModels();
   const modelsToUse = VISION_MODELS.filter(m => {
     const base = m.split(':')[0];
     return installed.some(a => a === m || a.startsWith(base + ':'));
   });
-  // Always try the primary model even if the cache is empty
   if (!modelsToUse.length) modelsToUse.push(VISION_MODELS[0]);
+  const primaryModel = modelsToUse[0];
   console.log(`[process] Modelos disponíveis: ${modelsToUse.join(', ')}`);
 
-  const results = await Promise.allSettled(
-    modelsToUse.map(model => callModel(model, base64, prompt))
-  );
+  let allRegistros = [];
 
-  const modelResults = results.map((r, i) => {
-    if (r.status === 'fulfilled') {
-      console.log(`[${modelsToUse[i]}] ${r.value.length} registro(s)`);
-      return r.value;
+  // --- Detect multiple records per page (images only) ---
+  const recordCount = isImage
+    ? await detectRecordCount(imageBuffer, primaryModel, OLLAMA_BASE)
+    : 1;
+
+  if (recordCount <= 1) {
+    // Single record or PDF: multi-model consensus on full image
+    const results = await Promise.allSettled(
+      modelsToUse.map(model => callModel(model, imageBuffer.toString('base64'), prompt))
+    );
+    const modelResults = results.map((r, i) => {
+      if (r.status === 'fulfilled') { console.log(`[${modelsToUse[i]}] ${r.value.length} registro(s)`); return r.value; }
+      console.warn(`[${modelsToUse[i]}] falhou:`, r.reason?.message);
+      return [];
+    });
+    allRegistros = mergeResults(modelResults);
+    podError = podError || (modelResults.every(r => r.length === 0) ? 'Todos os modelos falharam' : null);
+  } else {
+    // Multiple records: split image, process each segment with primary model
+    console.log(`[process] Segmentando em ${recordCount} parte(s)...`);
+    let segments;
+    try {
+      segments = await splitImage(imageBuffer, recordCount);
+    } catch (e) {
+      console.warn('[process] splitImage falhou, usando imagem completa:', e.message);
+      segments = [imageBuffer];
     }
-    console.warn(`[${modelsToUse[i]}] falhou:`, r.reason?.message);
-    return [];
-  });
 
-  const merged    = mergeResults(modelResults);
-  const registros = applyBookConstraints(merged, livro);
+    for (let i = 0; i < segments.length; i++) {
+      const segBase64 = segments[i].toString('base64');
+      console.log(`[process] Segmento ${i + 1}/${segments.length} → ${primaryModel}`);
+      try {
+        const records = await callModel(primaryModel, segBase64, prompt);
+        console.log(`[process] Segmento ${i + 1}: ${records.length} registro(s)`);
+        allRegistros.push(...records);
+      } catch (e) {
+        console.warn(`[process] Segmento ${i + 1} falhou:`, e.message);
+      }
+    }
+  }
 
-  console.log(`[process] Resultado final: ${registros.length} registro(s) (modelos OK: ${modelResults.filter(r => r.length > 0).length}/${modelsToUse.length})`);
+  const registros = applyBookConstraints(allRegistros, livro);
+  console.log(`[process] Resultado final: ${registros.length} registro(s)`);
 
-  const allFailed = modelResults.every(r => r.length === 0);
+  const allFailed = registros.length === 0;
   scheduleIdleStop();
   res.json({
     registros,
     ...arquivoInfo,
-    ...(allFailed ? { ai_error: true, ai_error_detail: podError || 'Todos os modelos falharam' } : {}),
+    ...(allFailed ? { ai_error: true, ai_error_detail: podError || 'Nenhum registro extraído' } : {}),
   });
 });
 
