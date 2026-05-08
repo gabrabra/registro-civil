@@ -1,6 +1,7 @@
-import { NavLink, useLocation } from 'react-router-dom';
-import { Users, Heart, BookHeart, Library, ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { NavLink } from 'react-router-dom';
+import { Users, BookHeart, Library, ChevronDown, ChevronRight, Power, Loader2 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { podApi } from '../api.js';
 
 const sections = [
   {
@@ -20,6 +21,64 @@ const sections = [
     ]
   }
 ];
+
+function PodWidget() {
+  const [status,   setStatus]   = useState('UNKNOWN');
+  const [stopping, setStopping] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const pod = await podApi.status();
+      setStatus(pod.desiredStatus ?? 'UNKNOWN');
+    } catch {
+      setStatus('UNKNOWN');
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+    const id = setInterval(fetchStatus, 30000);
+    return () => clearInterval(id);
+  }, [fetchStatus]);
+
+  async function handleStop() {
+    if (!window.confirm('Parar o pod do RunPod agora?')) return;
+    setStopping(true);
+    try {
+      await podApi.stop();
+      setStatus('EXITED');
+    } catch (e) {
+      alert('Erro ao parar: ' + e.message);
+    } finally {
+      setStopping(false);
+    }
+  }
+
+  const isRunning = status === 'RUNNING';
+  const dotColor  = isRunning ? 'bg-green-400' : status === 'UNKNOWN' ? 'bg-slate-500' : 'bg-slate-400';
+  const label     = isRunning ? 'RunPod ligado' : status === 'EXITED' ? 'RunPod desligado' : 'RunPod desconhecido';
+
+  return (
+    <div className="px-4 py-3 border-t border-white/10">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor} ${isRunning ? 'animate-pulse' : ''}`} />
+          <span className="text-xs text-slate-400 truncate">{label}</span>
+        </div>
+        {isRunning && (
+          <button
+            onClick={handleStop}
+            disabled={stopping}
+            title="Parar pod"
+            className="ml-2 flex-shrink-0 p-1 rounded text-slate-400 hover:text-red-400 hover:bg-white/10 transition-colors disabled:opacity-40"
+          >
+            {stopping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function Sidebar() {
   const [open, setOpen] = useState({ Acervo: true, 'Registro Civil': true });
@@ -72,7 +131,9 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="px-4 py-3 border-t border-white/10">
+      <PodWidget />
+
+      <div className="px-4 py-2 border-t border-white/10">
         <p className="text-xs text-slate-500">IA Indexação v1.1</p>
       </div>
     </aside>

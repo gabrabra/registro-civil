@@ -4,7 +4,7 @@ const axios   = require('axios');
 const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
-const { ensurePodRunning, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
+const { ensurePodRunning, scheduleIdleStop, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -125,6 +125,7 @@ router.post('/livro-capa', upload.single('file'), async (req, res) => {
     return null;
   }).filter(Boolean);
 
+  scheduleIdleStop();
   res.json(mergeCoverResults(objs));
 });
 

@@ -4,7 +4,7 @@ const axios   = require('axios');
 const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
-const { ensurePodRunning, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
+const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -177,7 +177,27 @@ router.post('/', upload.single('file'), async (req, res) => {
   console.log(`Resultado final: ${registros.length} registro(s) (modelos OK: ${modelResults.filter(r => r.length > 0).length}/${VISION_MODELS.length})`);
 
   const allFailed = modelResults.every(r => r.length === 0);
+  scheduleIdleStop();
   res.json({ registros, ...arquivoInfo, ...(allFailed ? { ai_error: true } : {}) });
+});
+
+// Pod management endpoints
+router.get('/pod/status', async (_req, res) => {
+  try {
+    const pod = await getPodStatus();
+    res.json(pod ?? { desiredStatus: 'UNKNOWN' });
+  } catch (e) {
+    res.json({ desiredStatus: 'UNKNOWN', error: e.message });
+  }
+});
+
+router.post('/pod/stop', async (_req, res) => {
+  try {
+    await stopPod();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = router;
