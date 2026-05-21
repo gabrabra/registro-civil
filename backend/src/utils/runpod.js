@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 const API_KEY  = process.env.RUNPOD_API_KEY  || '';
-const POD_ID   = process.env.RUNPOD_POD_ID   || 'dezvj7io08xznw';
+const POD_ID   = process.env.RUNPOD_POD_ID   || 'z4yvxlwakf42u5';
 const OLLAMA_BASE = process.env.RUNPOD_OLLAMA_URL ||
   `https://${POD_ID}-11434.proxy.runpod.net`;
 

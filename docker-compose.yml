@@ -36,7 +36,7 @@ services:
       ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@registrocivil.com}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-Admin@2024}"
       RUNPOD_API_KEY: "${RUNPOD_API_KEY}"
-      RUNPOD_POD_ID: "${RUNPOD_POD_ID:-dezvj7io08xznw}"
+      RUNPOD_POD_ID: "${RUNPOD_POD_ID:-z4yvxlwakf42u5}"
     volumes:
       - registro_civil_uploads:/app/uploads
     networks:
