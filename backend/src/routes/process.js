@@ -327,4 +327,13 @@ router.post('/pod/stop', async (_req, res) => {
   }
 });
 
+router.post('/pod/start', async (_req, res) => {
+  try {
+    await ensurePodRunning();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

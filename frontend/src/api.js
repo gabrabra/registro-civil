@@ -68,6 +68,7 @@ export const processLivroApi = {
 export const podApi = {
   status: () => http.get('/process/pod/status').then(r => r.data),
   stop:   () => http.post('/process/pod/stop').then(r => r.data),
+  start:  () => http.post('/process/pod/start').then(r => r.data),
 };
 
 export default http;

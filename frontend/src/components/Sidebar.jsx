@@ -23,8 +23,8 @@ const sections = [
 ];
 
 function PodWidget() {
-  const [status,   setStatus]   = useState('UNKNOWN');
-  const [stopping, setStopping] = useState(false);
+  const [status,  setStatus]  = useState('UNKNOWN');
+  const [loading, setLoading] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -43,20 +43,36 @@ function PodWidget() {
 
   async function handleStop() {
     if (!window.confirm('Parar o pod do RunPod agora?')) return;
-    setStopping(true);
+    setLoading(true);
     try {
       await podApi.stop();
       setStatus('EXITED');
     } catch (e) {
       alert('Erro ao parar: ' + e.message);
     } finally {
-      setStopping(false);
+      setLoading(false);
+    }
+  }
+
+  async function handleStart() {
+    if (!window.confirm('Ligar o pod do RunPod? Pode levar até 3 minutos para ficar pronto.')) return;
+    setLoading(true);
+    setStatus('RUNNING'); // otimista
+    try {
+      await podApi.start();
+      await fetchStatus();
+    } catch (e) {
+      alert('Erro ao ligar: ' + e.message);
+      await fetchStatus();
+    } finally {
+      setLoading(false);
     }
   }
 
   const isRunning = status === 'RUNNING';
+  const isStopped = status === 'EXITED';
   const dotColor  = isRunning ? 'bg-green-400' : status === 'UNKNOWN' ? 'bg-slate-500' : 'bg-slate-400';
-  const label     = isRunning ? 'RunPod ligado' : status === 'EXITED' ? 'RunPod desligado' : 'RunPod desconhecido';
+  const label     = isRunning ? 'RunPod ligado' : isStopped ? 'RunPod desligado' : 'RunPod desconhecido';
 
   return (
     <div className="px-4 py-3 border-t border-white/10">
@@ -66,13 +82,15 @@ function PodWidget() {
           <span className="text-xs text-slate-400 truncate">{label}</span>
         </div>
         {isRunning && (
-          <button
-            onClick={handleStop}
-            disabled={stopping}
-            title="Parar pod"
-            className="ml-2 flex-shrink-0 p-1 rounded text-slate-400 hover:text-red-400 hover:bg-white/10 transition-colors disabled:opacity-40"
-          >
-            {stopping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
+          <button onClick={handleStop} disabled={loading} title="Parar pod"
+            className="ml-2 flex-shrink-0 p-1 rounded text-slate-400 hover:text-red-400 hover:bg-white/10 transition-colors disabled:opacity-40">
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
+          </button>
+        )}
+        {isStopped && (
+          <button onClick={handleStart} disabled={loading} title="Ligar pod"
+            className="ml-2 flex-shrink-0 p-1 rounded text-slate-400 hover:text-green-400 hover:bg-white/10 transition-colors disabled:opacity-40">
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
           </button>
         )}
       </div>
