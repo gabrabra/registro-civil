@@ -4,7 +4,7 @@ const axios   = require('axios');
 const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
-const { ensurePodRunning, scheduleIdleStop, getAvailableModels, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
+const { ensurePodRunning, scheduleIdleStop, getAvailableModels, getOllamaBase, VISION_MODELS } = require('../utils/runpod');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -58,7 +58,7 @@ const COVER_FIELDS = [
 async function callModelForCover(modelName, base64) {
   let raw = '';
   try {
-    const resp = await axios.post(`${OLLAMA_BASE}/api/chat`, {
+    const resp = await axios.post(`${getOllamaBase()}/api/chat`, {
       model: modelName,
       stream: true,
       keep_alive: -1,

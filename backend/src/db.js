@@ -64,6 +64,14 @@ async function initDb() {
   await pool.query(`ALTER TABLE livros ADD COLUMN IF NOT EXISTS arquivo_capa_nome VARCHAR(500)`).catch(() => {});
   await pool.query(`ALTER TABLE livros ADD COLUMN IF NOT EXISTS arquivo_capa_url  VARCHAR(500)`).catch(() => {});
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS configuracoes (
+      chave        VARCHAR(100) PRIMARY KEY,
+      valor        TEXT,
+      atualizado_em TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   // Seed admin user
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@registrocivil.com';
   const adminPass  = process.env.ADMIN_PASSWORD || 'Admin@2024';

@@ -10,6 +10,7 @@ import NascimentosList from './pages/nascimentos/List.jsx';
 import NascimentosForm from './pages/nascimentos/Form.jsx';
 import BatchImport from './pages/nascimentos/BatchImport.jsx';
 import Placeholder from './pages/Placeholder.jsx';
+import Config from './pages/Config.jsx';
 
 export default function App() {
   return (
@@ -31,8 +32,9 @@ export default function App() {
               <Route path="nascimentos/novo"         element={<NascimentosForm />} />
               <Route path="nascimentos/:id/editar"   element={<NascimentosForm />} />
               <Route path="nascimentos/lote"         element={<BatchImport />} />
-              <Route path="obitos"     element={<Placeholder title="Óbitos" />} />
-              <Route path="casamentos" element={<Placeholder title="Casamentos" />} />
+              <Route path="obitos"        element={<Placeholder title="Óbitos" />} />
+              <Route path="casamentos"   element={<Placeholder title="Casamentos" />} />
+              <Route path="configuracoes" element={<Config />} />
             </Route>
           </Routes>
         </BrowserRouter>

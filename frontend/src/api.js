@@ -71,4 +71,10 @@ export const podApi = {
   start:  () => http.post('/process/pod/start').then(r => r.data),
 };
 
+export const configApi = {
+  get:      ()       => http.get('/config').then(r => r.data),
+  save:     (pod_id) => http.put('/config', { pod_id }).then(r => r.data),
+  validate: ()       => http.get('/config/validate').then(r => r.data),
+};
+
 export default http;

@@ -1,13 +1,15 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { initDb } = require('./db');
+const { initDb, pool } = require('./db');
 const { auth } = require('./middleware/auth');
-const authRouter        = require('./routes/auth');
-const livrosRouter      = require('./routes/livros');
-const nascimentosRouter = require('./routes/nascimentos');
-const processRouter     = require('./routes/process');
+const { loadConfigFromDb } = require('./utils/runpod');
+const authRouter         = require('./routes/auth');
+const livrosRouter       = require('./routes/livros');
+const nascimentosRouter  = require('./routes/nascimentos');
+const processRouter      = require('./routes/process');
 const processLivroRouter = require('./routes/process-livro');
+const configRouter       = require('./routes/config');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -24,6 +26,7 @@ app.use('/api/livros',       auth, livrosRouter);
 app.use('/api/nascimentos',  auth, nascimentosRouter);
 app.use('/api/process',      auth, processRouter);
 app.use('/api/process',      auth, processLivroRouter); // /livro-capa
+app.use('/api/config',       auth, configRouter);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
@@ -35,6 +38,7 @@ async function start() {
     try {
       await initDb();
       console.log('Database ready');
+      await loadConfigFromDb(pool);
       break;
     } catch (e) {
       retries--;

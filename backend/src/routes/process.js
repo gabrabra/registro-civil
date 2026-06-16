@@ -5,7 +5,7 @@ const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
 const { pool } = require('../db');
-const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getAvailableModels, OLLAMA_BASE, VISION_MODELS } = require('../utils/runpod');
+const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getAvailableModels, getOllamaBase, VISION_MODELS } = require('../utils/runpod');
 const { detectRecordCount, splitImage } = require('../utils/imageSegment');
 const router  = express.Router();
 
@@ -140,7 +140,7 @@ const RECORD_FIELDS = [
 async function callModel(modelName, base64, prompt) {
   let raw = '';
   try {
-    const resp = await axios.post(`${OLLAMA_BASE}/api/chat`, {
+    const resp = await axios.post(`${getOllamaBase()}/api/chat`, {
       model: modelName,
       stream: true,
       keep_alive: -1,
@@ -244,7 +244,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 
   // --- Detect multiple records per page (images only) ---
   const recordCount = isImage
-    ? await detectRecordCount(imageBuffer, primaryModel, OLLAMA_BASE)
+    ? await detectRecordCount(imageBuffer, primaryModel, getOllamaBase())
     : 1;
 
   if (recordCount <= 1) {
@@ -301,7 +301,7 @@ router.get('/debug', async (_req, res) => {
   let pod = null, ollamaOk = false, models = [];
   try { pod = await getPodStatus(); } catch (e) { pod = { error: e.message }; }
   try {
-    const r = await require('axios').get(`${OLLAMA_BASE}/api/tags`, { timeout: 5000 });
+    const r = await require('axios').get(`${getOllamaBase()}/api/tags`, { timeout: 5000 });
     ollamaOk = true;
     models = (r.data?.models || []).map(m => m.name);
   } catch (e) { ollamaOk = false; }

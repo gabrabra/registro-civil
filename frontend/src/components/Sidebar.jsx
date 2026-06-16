@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Users, BookHeart, Library, ChevronDown, ChevronRight, Power, Loader2 } from 'lucide-react';
+import { Users, BookHeart, Library, ChevronDown, ChevronRight, Power, Loader2, Settings } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { podApi } from '../api.js';
 
@@ -148,6 +148,22 @@ export default function Sidebar() {
           );
         })}
       </nav>
+
+      <div className="px-3 pb-2">
+        <NavLink
+          to="/configuracoes"
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              isActive
+                ? 'text-blue-400 bg-blue-900/30 font-medium'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+            }`
+          }
+        >
+          <Settings className="w-4 h-4 flex-shrink-0" />
+          Configurações
+        </NavLink>
+      </div>
 
       <PodWidget />
 
