@@ -2,7 +2,7 @@ const express = require('express');
 const path    = require('path');
 const { pool } = require('../db');
 const { locateFields } = require('../utils/imageLocalize');
-const { getOllamaBase, getAvailableModels, VISION_MODELS } = require('../utils/runpod');
+const { getOllamaBase, getActiveModel } = require('../utils/runpod');
 const router = express.Router();
 
 function addArquivoUrl(row) {
@@ -152,10 +152,7 @@ router.post('/:id/localizar', async (req, res) => {
     const isPdf = (record.arquivo_tipo || '').includes('pdf');
     if (isPdf) return res.status(400).json({ error: 'Localização não disponível para PDFs' });
 
-    // Pick best model — prefer qwen2.5vl (best at grounding)
-    const installed = await getAvailableModels();
-    const qwenInstalled = installed.find(m => m.includes('qwen2.5vl'));
-    const modelName = qwenInstalled || installed[0] || VISION_MODELS[0];
+    const modelName = getActiveModel();
 
     console.log(`[localizar] id=${record.id} model=${modelName}`);
     const bbox = await locateFields(record.arquivo_path, record, getOllamaBase(), modelName);

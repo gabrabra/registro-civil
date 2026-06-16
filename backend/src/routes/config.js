@@ -5,7 +5,7 @@ const {
   getPodId, getOllamaBase, setPodId,
   getPodStatus, getAvailableModels,
   getPullingModels, pullModel,
-  VISION_MODELS,
+  getActiveModel, setActiveModel,
 } = require('../utils/runpod');
 
 // Modelos de visão conhecidos que podem ser instalados
@@ -24,26 +24,40 @@ const router = express.Router();
 // GET /api/config  — retorna config atual
 router.get('/', (_req, res) => {
   res.json({
-    pod_id:      getPodId(),
-    ollama_url:  getOllamaBase(),
-    api_key_set: Boolean(process.env.RUNPOD_API_KEY),
+    pod_id:       getPodId(),
+    ollama_url:   getOllamaBase(),
+    api_key_set:  Boolean(process.env.RUNPOD_API_KEY),
+    active_model: getActiveModel(),
   });
 });
 
-// PUT /api/config  — altera pod ID, persiste no banco
+// PUT /api/config  — altera pod ID e/ou modelo ativo, persiste no banco
 router.put('/', async (req, res) => {
-  const newId = (req.body.pod_id || '').trim();
-  if (!newId) return res.status(400).json({ error: 'pod_id é obrigatório' });
+  const newId    = (req.body.pod_id      || '').trim();
+  const newModel = (req.body.active_model || '').trim();
+
+  if (!newId && !newModel) return res.status(400).json({ error: 'pod_id ou active_model é obrigatório' });
 
   try {
-    await pool.query(
-      `INSERT INTO configuracoes (chave, valor)
-       VALUES ('runpod_pod_id', $1)
-       ON CONFLICT (chave) DO UPDATE SET valor = $1, atualizado_em = NOW()`,
-      [newId]
-    );
-    setPodId(newId);
-    res.json({ ok: true, pod_id: getPodId(), ollama_url: getOllamaBase() });
+    if (newId) {
+      await pool.query(
+        `INSERT INTO configuracoes (chave, valor)
+         VALUES ('runpod_pod_id', $1)
+         ON CONFLICT (chave) DO UPDATE SET valor = $1, atualizado_em = NOW()`,
+        [newId]
+      );
+      setPodId(newId);
+    }
+    if (newModel) {
+      await pool.query(
+        `INSERT INTO configuracoes (chave, valor)
+         VALUES ('ai_model', $1)
+         ON CONFLICT (chave) DO UPDATE SET valor = $1, atualizado_em = NOW()`,
+        [newModel]
+      );
+      setActiveModel(newModel);
+    }
+    res.json({ ok: true, pod_id: getPodId(), ollama_url: getOllamaBase(), active_model: getActiveModel() });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -73,14 +87,16 @@ router.post('/install-model', async (req, res) => {
 
 // GET /api/config/validate  — verifica pod + Ollama + modelos
 router.get('/validate', async (_req, res) => {
+  const activeModel = getActiveModel();
   const result = {
     pod_id:           getPodId(),
     ollama_url:       getOllamaBase(),
+    active_model:     activeModel,
     pod_status:       null,
     pod_error:        null,
     ollama_ok:        false,
     ollama_error:     null,
-    models_required:  VISION_MODELS,
+    models_required:  [activeModel],
     models_installed: [],
     models_missing:   [],
     models_pulling:   getPullingModels(),
@@ -106,7 +122,7 @@ router.get('/validate', async (_req, res) => {
   }
 
   // 3. Which required models are missing
-  result.models_missing = VISION_MODELS.filter(m => {
+  result.models_missing = [activeModel].filter(m => {
     const base = m.split(':')[0];
     return !result.models_installed.some(a => a === m || a.startsWith(base + ':'));
   });

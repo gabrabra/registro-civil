@@ -4,7 +4,7 @@ const axios   = require('axios');
 const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
-const { ensurePodRunning, scheduleIdleStop, getAvailableModels, getOllamaBase, VISION_MODELS } = require('../utils/runpod');
+const { ensurePodRunning, scheduleIdleStop, getOllamaBase, getActiveModel } = require('../utils/runpod');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -48,13 +48,6 @@ const COVER_PROMPT =
   '  "estado": "sigla UF ex: PE ou null"\n' +
   '}';
 
-const COVER_FIELDS = [
-  'numero', 'cartorio', 'cnpj', 'cns',
-  'termo_inicio', 'termo_fim',
-  'data_inicio', 'data_fim',
-  'municipio', 'estado',
-];
-
 async function callModelForCover(modelName, base64) {
   let raw = '';
   try {
@@ -78,28 +71,6 @@ async function callModelForCover(modelName, base64) {
   return JSON.parse(match[0]);
 }
 
-function majorityValue(values) {
-  const valid = values.filter(v => v != null && String(v).trim() !== '' && String(v).toLowerCase() !== 'null');
-  if (!valid.length) return null;
-  const freq = {};
-  for (const v of valid) {
-    const k = String(v).toLowerCase().trim();
-    if (!freq[k]) freq[k] = { count: 0, value: v };
-    freq[k].count++;
-  }
-  return Object.values(freq).sort((a, b) => b.count - a.count)[0].value;
-}
-
-function mergeCoverResults(objs) {
-  const valid = objs.filter(o => o && !o.erro);
-  if (!valid.length) return objs[0] || { erro: 'Todos os modelos falharam' };
-  const result = {};
-  for (const field of COVER_FIELDS) {
-    result[field] = majorityValue(valid.map(o => o[field] ?? null));
-  }
-  return result;
-}
-
 router.post('/livro-capa', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhuma imagem enviada' });
 
@@ -117,26 +88,19 @@ router.post('/livro-capa', upload.single('file'), async (req, res) => {
     return res.status(503).json({ erro: 'Pod indisponível: ' + err.message });
   }
 
-  const installed   = await getAvailableModels();
-  const modelsToUse = VISION_MODELS.filter(m => {
-    const base = m.split(':')[0];
-    return installed.some(a => a === m || a.startsWith(base + ':'));
-  });
-  if (!modelsToUse.length) modelsToUse.push(VISION_MODELS[0]);
-  console.log(`[process-livro] Modelos disponíveis: ${modelsToUse.join(', ')}`);
+  const model = getActiveModel();
+  console.log(`[process-livro] Modelo ativo: ${model}`);
 
-  const results = await Promise.allSettled(
-    modelsToUse.map(model => callModelForCover(model, base64))
-  );
-
-  const objs = results.map((r, i) => {
-    if (r.status === 'fulfilled') { console.log(`[${modelsToUse[i]}] capa OK`); return r.value; }
-    console.warn(`[${modelsToUse[i]}] capa falhou:`, r.reason?.message);
-    return null;
-  }).filter(Boolean);
+  let coverData = null;
+  try {
+    coverData = await callModelForCover(model, base64);
+    console.log(`[process-livro] ${model}: capa OK`);
+  } catch (e) {
+    console.warn(`[process-livro] ${model}: capa falhou:`, e.message);
+  }
 
   scheduleIdleStop();
-  res.json({ ...mergeCoverResults(objs), ...arquivoInfo });
+  res.json({ ...(coverData || {}), ...arquivoInfo });
 });
 
 module.exports = router;

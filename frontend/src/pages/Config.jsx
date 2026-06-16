@@ -3,7 +3,7 @@ import { configApi } from '../api.js';
 import {
   Settings, Save, Loader2,
   CheckCircle2, XCircle, AlertCircle, RefreshCw,
-  Download, Package,
+  Download, Package, Cpu,
 } from 'lucide-react';
 
 function Card({ children, className = '' }) {
@@ -65,6 +65,10 @@ export default function Config() {
   const [saving,  setSaving]  = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
 
+  const [activeModel,    setActiveModel]    = useState('');
+  const [savingModel,    setSavingModel]    = useState(false);
+  const [saveModelMsg,   setSaveModelMsg]   = useState(null);
+
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState(null);
   const [installing, setInstalling] = useState({});
@@ -73,7 +77,10 @@ export default function Config() {
   const [installMsg, setInstallMsg] = useState(null);
 
   useEffect(() => {
-    configApi.get().then(d => setPodId(d.pod_id || '')).catch(() => {});
+    configApi.get().then(d => {
+      setPodId(d.pod_id || '');
+      setActiveModel(d.active_model || 'qwen2.5vl:7b');
+    }).catch(() => {});
     configApi.catalog().then(d => setCatalog(d.models || [])).catch(() => {});
   }, []);
 
@@ -109,6 +116,20 @@ export default function Config() {
       setSaveMsg({ ok: false, text: err?.response?.data?.error || err.message });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSaveModel(modelName) {
+    setSavingModel(true);
+    setSaveModelMsg(null);
+    try {
+      await configApi.saveModel(modelName);
+      setActiveModel(modelName);
+      setSaveModelMsg({ ok: true, text: `Modelo "${modelName}" definido para processamento.` });
+    } catch (err) {
+      setSaveModelMsg({ ok: false, text: err?.response?.data?.error || err.message });
+    } finally {
+      setSavingModel(false);
     }
   }
 
@@ -284,6 +305,82 @@ export default function Config() {
         )}
       </Card>
 
+      {/* Active model selector */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <Cpu className="w-4 h-4 text-slate-500" />
+          <SectionTitle>Modelo de processamento</SectionTitle>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          Escolha qual modelo de IA será usado ao processar registros. Apenas modelos instalados podem ser selecionados.
+        </p>
+
+        {saveModelMsg && (
+          <div className={`flex items-start gap-2 text-sm px-3 py-2.5 rounded-lg border mb-4 ${
+            saveModelMsg.ok
+              ? 'bg-green-50 border-green-200 text-green-800'
+              : 'bg-red-50 border-red-200 text-red-800'
+          }`}>
+            {saveModelMsg.ok
+              ? <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              : <XCircle      className="w-4 h-4 mt-0.5 flex-shrink-0" />}
+            <span>{saveModelMsg.text}</span>
+          </div>
+        )}
+
+        <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+          {catalog.map(m => {
+            const isInstalled = validation?.models_installed?.some(
+              a => a === m.name || a.startsWith(m.name.split(':')[0] + ':')
+            );
+            const isActive = activeModel === m.name ||
+              (!activeModel && m.name === 'qwen2.5vl:7b');
+
+            return (
+              <label
+                key={m.name}
+                className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${
+                  isInstalled ? 'hover:bg-slate-50' : 'opacity-50 cursor-not-allowed'
+                } ${isActive ? 'bg-blue-50' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="active_model"
+                  value={m.name}
+                  checked={isActive}
+                  disabled={!isInstalled || savingModel}
+                  onChange={() => handleSaveModel(m.name)}
+                  className="accent-blue-600"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-800">{m.label}</span>
+                    {isActive && (
+                      <span className="text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-medium">ativo</span>
+                    )}
+                    {!isInstalled && (
+                      <span className="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-200">não instalado</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">{m.name}</p>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+
+        {!validation && (
+          <p className="text-xs text-slate-400 mt-3">
+            Clique em "Verificar agora" na seção de validação para ver quais modelos estão instalados.
+          </p>
+        )}
+        {savingModel && (
+          <p className="text-xs text-blue-600 flex items-center gap-1 mt-3">
+            <Loader2 className="w-3 h-3 animate-spin" />Salvando modelo…
+          </p>
+        )}
+      </Card>
+
       {/* Install additional models */}
       <Card>
         <div className="flex items-center gap-2 mb-4">
@@ -355,8 +452,8 @@ export default function Config() {
             <span className="text-slate-800 font-medium">1.1</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-500">Modelo padrão</span>
-            <span className="text-slate-800 font-mono text-xs">qwen2.5vl:7b</span>
+            <span className="text-slate-500">Modelo ativo</span>
+            <span className="text-slate-800 font-mono text-xs">{activeModel || 'qwen2.5vl:7b'}</span>
           </div>
         </div>
       </Card>

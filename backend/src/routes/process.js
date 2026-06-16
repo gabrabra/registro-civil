@@ -5,8 +5,8 @@ const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
 const { pool } = require('../db');
-const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getAvailableModels, getOllamaBase, VISION_MODELS } = require('../utils/runpod');
-const { detectRecordCount, splitImage } = require('../utils/imageSegment');
+const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getOllamaBase, getActiveModel } = require('../utils/runpod');
+const { detectRecordCount } = require('../utils/imageSegment');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -61,8 +61,8 @@ const BASE_PROMPT =
   'Se houver apenas um registro, retorne um array com um único elemento.\n' +
   'Se não houver registros de nascimento visíveis, retorne um array vazio: []';
 
-function buildPrompt(livro) {
-  if (!livro) return BASE_PROMPT;
+function buildPrompt(livro, recordCountHint) {
+  if (!livro && !recordCountHint) return BASE_PROMPT;
 
   const yearStart = livro.data_inicio ? new Date(livro.data_inicio).getFullYear() : null;
   const yearEnd   = livro.data_fim    ? new Date(livro.data_fim).getFullYear()    : null;
@@ -70,21 +70,28 @@ function buildPrompt(livro) {
     ? `${yearStart ?? '?'} a ${yearEnd ?? '?'}`
     : null;
 
-  let ctx = '\n\nCONTEXTO DO LIVRO (dados verificados — use para corrigir sua leitura):';
-  ctx += `\n- Número do Livro: ${livro.numero}`;
-  if (livro.cartorio)  ctx += `\n- Cartório: ${livro.cartorio}`;
-  if (livro.municipio) ctx += `\n- Município: ${livro.municipio}`;
-  if (livro.estado)    ctx += `\n- Estado: ${livro.estado}`;
-  if (yearRange)       ctx += `\n- Período do livro: ${yearRange}`;
-  if (livro.termo_inicio && livro.termo_fim)
-    ctx += `\n- Termos: ${livro.termo_inicio} a ${livro.termo_fim}`;
+  let ctx = livro ? '\n\nCONTEXTO DO LIVRO (dados verificados — use para corrigir sua leitura):' : '';
+  if (livro) {
+    ctx += `\n- Número do Livro: ${livro.numero}`;
+    if (livro.cartorio)  ctx += `\n- Cartório: ${livro.cartorio}`;
+    if (livro.municipio) ctx += `\n- Município: ${livro.municipio}`;
+    if (livro.estado)    ctx += `\n- Estado: ${livro.estado}`;
+    if (yearRange)       ctx += `\n- Período do livro: ${yearRange}`;
+    if (livro.termo_inicio && livro.termo_fim)
+      ctx += `\n- Termos: ${livro.termo_inicio} a ${livro.termo_fim}`;
 
-  if (yearRange) {
-    ctx += `\n\nATENÇÃO: O campo "ano" de cada registro DEVE estar entre ${yearStart ?? '?'} e ${yearEnd ?? '?'}.`;
-    ctx += ` Se você encontrar um ano fora deste intervalo, você cometeu um erro de leitura — releia com mais cuidado.`;
+    if (yearRange) {
+      ctx += `\n\nATENÇÃO: O campo "ano" de cada registro DEVE estar entre ${yearStart ?? '?'} e ${yearEnd ?? '?'}.`;
+      ctx += ` Se você encontrar um ano fora deste intervalo, você cometeu um erro de leitura — releia com mais cuidado.`;
+    }
+    if (livro.municipio)
+      ctx += `\n"municipio" deve ser "${livro.municipio}" e "estado" deve ser "${livro.estado || '?'}" conforme o livro.`;
   }
-  if (livro.municipio)
-    ctx += `\n"municipio" deve ser "${livro.municipio}" e "estado" deve ser "${livro.estado || '?'}" conforme o livro.`;
+
+  if (recordCountHint && recordCountHint > 1) {
+    ctx += `\n\nIMPORTANTE: Esta imagem contém EXATAMENTE ${recordCountHint} registros de nascimento.`;
+    ctx += ` Você DEVE retornar um array com EXATAMENTE ${recordCountHint} objetos — um por registro. Não retorne array vazio.`;
+  }
 
   return BASE_PROMPT + ctx;
 }
@@ -131,12 +138,6 @@ function applyBookConstraints(registros, livro) {
   });
 }
 
-const RECORD_FIELDS = [
-  'nome_completo', 'nome_mae', 'nome_pai',
-  'data_nascimento', 'ano', 'numero_termo',
-  'municipio', 'estado', 'observacoes',
-];
-
 async function callModel(modelName, base64, prompt) {
   let raw = '';
   try {
@@ -167,44 +168,6 @@ async function callModel(modelName, base64, prompt) {
   return [];
 }
 
-function majorityValue(values) {
-  const valid = values.filter(v => v != null && String(v).trim() !== '' && String(v).toLowerCase() !== 'null');
-  if (!valid.length) return null;
-  const freq = {};
-  for (const v of valid) {
-    const k = String(v).toLowerCase().trim();
-    if (!freq[k]) freq[k] = { count: 0, value: v };
-    freq[k].count++;
-  }
-  return Object.values(freq).sort((a, b) => b.count - a.count)[0].value;
-}
-
-function mergeResults(allRegistros) {
-  const successful = allRegistros.filter(r => r.length > 0);
-  if (!successful.length) return [];
-
-  const countFreq = {};
-  for (const r of successful) countFreq[r.length] = (countFreq[r.length] || 0) + 1;
-  const consensusCount = Number(Object.entries(countFreq).sort((a, b) => b[1] - a[1])[0][0]);
-
-  const merged = [];
-  for (let i = 0; i < consensusCount; i++) {
-    const rec = {};
-    for (const field of RECORD_FIELDS) {
-      rec[field] = majorityValue(successful.map(r => r[i]?.[field] ?? null));
-    }
-    const populated = RECORD_FIELDS.filter(f => rec[f] != null);
-    const agreed = populated.filter(f => {
-      const vals = successful.map(r => String(r[i]?.[f] ?? '').toLowerCase().trim()).filter(v => v && v !== 'null');
-      return new Set(vals).size <= 1;
-    });
-    const ratio = populated.length ? agreed.length / populated.length : 0;
-    rec.confianca = ratio >= 0.8 ? 'alta' : ratio >= 0.5 ? 'media' : 'baixa';
-    merged.push(rec);
-  }
-  return merged;
-}
-
 router.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
@@ -221,8 +184,8 @@ router.post('/', upload.single('file'), async (req, res) => {
     console.warn('[process] ensurePodRunning falhou:', err.message);
   }
 
-  const livro  = await getLivro(livroId);
-  const prompt = buildPrompt(livro);
+  const livro = await getLivro(livroId);
+  const model = getActiveModel();
 
   const arquivoInfo = {
     arquivo_path: filePath,
@@ -231,56 +194,26 @@ router.post('/', upload.single('file'), async (req, res) => {
     arquivo_url:  `/files/${req.file.filename}`
   };
 
-  const installed   = await getAvailableModels();
-  const modelsToUse = VISION_MODELS.filter(m => {
-    const base = m.split(':')[0];
-    return installed.some(a => a === m || a.startsWith(base + ':'));
-  });
-  if (!modelsToUse.length) modelsToUse.push(VISION_MODELS[0]);
-  const primaryModel = modelsToUse[0];
-  console.log(`[process] Modelos disponíveis: ${modelsToUse.join(', ')}`);
+  console.log(`[process] Modelo ativo: ${model}`);
 
   let allRegistros = [];
 
-  // --- Detect multiple records per page (images only) ---
+  // Detect number of records in page (images only)
   const recordCount = isImage
-    ? await detectRecordCount(imageBuffer, primaryModel, getOllamaBase())
+    ? await detectRecordCount(imageBuffer, model, getOllamaBase())
     : 1;
 
-  if (recordCount <= 1) {
-    // Single record or PDF: multi-model consensus on full image
-    const results = await Promise.allSettled(
-      modelsToUse.map(model => callModel(model, imageBuffer.toString('base64'), prompt))
-    );
-    const modelResults = results.map((r, i) => {
-      if (r.status === 'fulfilled') { console.log(`[${modelsToUse[i]}] ${r.value.length} registro(s)`); return r.value; }
-      console.warn(`[${modelsToUse[i]}] falhou:`, r.reason?.message);
-      return [];
-    });
-    allRegistros = mergeResults(modelResults);
-    podError = podError || (modelResults.every(r => r.length === 0) ? 'Todos os modelos falharam' : null);
-  } else {
-    // Multiple records: split image, process each segment with primary model
-    console.log(`[process] Segmentando em ${recordCount} parte(s)...`);
-    let segments;
-    try {
-      segments = await splitImage(imageBuffer, recordCount);
-    } catch (e) {
-      console.warn('[process] splitImage falhou, usando imagem completa:', e.message);
-      segments = [imageBuffer];
-    }
+  // Always process the FULL image — splitting causes partial records that fool the model
+  const prompt = buildPrompt(livro, recordCount > 1 ? recordCount : null);
+  console.log(`[process] Processando imagem completa (${recordCount} registro(s) detectados) → ${model}`);
 
-    for (let i = 0; i < segments.length; i++) {
-      const segBase64 = segments[i].toString('base64');
-      console.log(`[process] Segmento ${i + 1}/${segments.length} → ${primaryModel}`);
-      try {
-        const records = await callModel(primaryModel, segBase64, prompt);
-        console.log(`[process] Segmento ${i + 1}: ${records.length} registro(s)`);
-        allRegistros.push(...records);
-      } catch (e) {
-        console.warn(`[process] Segmento ${i + 1} falhou:`, e.message);
-      }
-    }
+  try {
+    const records = await callModel(model, imageBuffer.toString('base64'), prompt);
+    console.log(`[process] ${model}: ${records.length} registro(s)`);
+    allRegistros = records;
+  } catch (e) {
+    console.warn(`[process] ${model} falhou:`, e.message);
+    podError = podError || e.message;
   }
 
   const registros = applyBookConstraints(allRegistros, livro);

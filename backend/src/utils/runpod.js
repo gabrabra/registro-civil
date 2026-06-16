@@ -2,13 +2,12 @@ const axios = require('axios');
 
 const API_KEY = process.env.RUNPOD_API_KEY || '';
 
-let _podId      = process.env.RUNPOD_POD_ID || 'k0vwks9huazlyg';
-let _ollamaBase = process.env.RUNPOD_OLLAMA_URL || `https://${_podId}-11434.proxy.runpod.net`;
+let _podId        = process.env.RUNPOD_POD_ID || 'k0vwks9huazlyg';
+let _ollamaBase   = process.env.RUNPOD_OLLAMA_URL || `https://${_podId}-11434.proxy.runpod.net`;
+let _activeModel  = 'qwen2.5vl:7b';
 
 console.log(`[runpod] POD_ID="${_podId}" OLLAMA_BASE="${_ollamaBase}" API_KEY=${API_KEY ? 'SET' : 'NOT SET'}`);
 
-// Models used for inference (whichever are installed will be used)
-const VISION_MODELS = ['qwen2.5vl:7b', 'minicpm-v', 'llama3.2-vision'];
 // Only this model is auto-installed on pod startup
 const AUTO_INSTALL_MODELS = ['qwen2.5vl:7b'];
 const IDLE_STOP_MS  = Number(process.env.RUNPOD_IDLE_STOP_MS) || 15 * 60 * 1000;
@@ -18,8 +17,9 @@ let idleTimer  = null;
 
 let modelCache = { models: null, ts: 0 };
 
-function getPodId()      { return _podId; }
-function getOllamaBase() { return _ollamaBase; }
+function getPodId()       { return _podId; }
+function getOllamaBase()  { return _ollamaBase; }
+function getActiveModel() { return _activeModel; }
 
 function setPodId(newId) {
   _podId = newId;
@@ -30,12 +30,23 @@ function setPodId(newId) {
   console.log(`[runpod] Pod ID atualizado → "${_podId}" (${_ollamaBase})`);
 }
 
+function setActiveModel(modelName) {
+  _activeModel = modelName || 'qwen2.5vl:7b';
+  console.log(`[runpod] Modelo ativo → "${_activeModel}"`);
+}
+
 async function loadConfigFromDb(pool) {
   try {
-    const r = await pool.query("SELECT valor FROM configuracoes WHERE chave = 'runpod_pod_id'");
-    if (r.rows.length && r.rows[0].valor) {
-      setPodId(r.rows[0].valor);
-      console.log(`[runpod] Pod ID carregado do banco: ${_podId}`);
+    const r = await pool.query("SELECT chave, valor FROM configuracoes WHERE chave IN ('runpod_pod_id', 'ai_model')");
+    for (const row of r.rows) {
+      if (row.chave === 'runpod_pod_id' && row.valor) {
+        setPodId(row.valor);
+        console.log(`[runpod] Pod ID carregado do banco: ${_podId}`);
+      }
+      if (row.chave === 'ai_model' && row.valor) {
+        setActiveModel(row.valor);
+        console.log(`[runpod] Modelo ativo carregado do banco: ${_activeModel}`);
+      }
     }
   } catch (e) {
     console.warn('[runpod] Não foi possível carregar config do banco:', e.message);
@@ -177,6 +188,6 @@ module.exports = {
   getPodStatus, getPodConfig,
   getAvailableModels,
   getPodId, getOllamaBase, setPodId, loadConfigFromDb,
+  getActiveModel, setActiveModel,
   getPullingModels, pullModel,
-  VISION_MODELS,
 };
