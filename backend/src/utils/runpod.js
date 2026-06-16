@@ -7,7 +7,10 @@ let _ollamaBase = process.env.RUNPOD_OLLAMA_URL || `https://${_podId}-11434.prox
 
 console.log(`[runpod] POD_ID="${_podId}" OLLAMA_BASE="${_ollamaBase}" API_KEY=${API_KEY ? 'SET' : 'NOT SET'}`);
 
+// Models used for inference (whichever are installed will be used)
 const VISION_MODELS = ['qwen2.5vl:7b', 'minicpm-v', 'llama3.2-vision'];
+// Only this model is auto-installed on pod startup
+const AUTO_INSTALL_MODELS = ['qwen2.5vl:7b'];
 const IDLE_STOP_MS  = Number(process.env.RUNPOD_IDLE_STOP_MS) || 15 * 60 * 1000;
 
 const pulling = new Set();
@@ -104,7 +107,7 @@ async function ollamaReady(maxMs = 300000) {
 
 async function ensureModels() {
   const installed = await getAvailableModels();
-  for (const model of VISION_MODELS) {
+  for (const model of AUTO_INSTALL_MODELS) {
     if (pulling.has(model)) continue;
     const base  = model.split(':')[0];
     const found = installed.some(m => m === model || m.startsWith(base + ':'));
