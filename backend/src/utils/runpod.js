@@ -152,10 +152,28 @@ function getPodConfig() {
   return { POD_ID: _podId, OLLAMA_BASE: _ollamaBase, API_KEY_SET: Boolean(API_KEY) };
 }
 
+function getPullingModels() {
+  return [...pulling];
+}
+
+function pullModel(modelName) {
+  if (pulling.has(modelName)) return;
+  pulling.add(modelName);
+  console.log(`[runpod] Pulling ${modelName}...`);
+  axios.post(`${_ollamaBase}/api/pull`, { name: modelName, stream: false }, { timeout: 1800000 })
+    .then(() => {
+      console.log(`[runpod] ${modelName} pronto`);
+      modelCache = { models: null, ts: 0 };
+    })
+    .catch(e => console.error(`[runpod] Pull ${modelName} falhou:`, e.message))
+    .finally(() => pulling.delete(modelName));
+}
+
 module.exports = {
   ensurePodRunning, stopPod, scheduleIdleStop,
   getPodStatus, getPodConfig,
   getAvailableModels,
   getPodId, getOllamaBase, setPodId, loadConfigFromDb,
+  getPullingModels, pullModel,
   VISION_MODELS,
 };

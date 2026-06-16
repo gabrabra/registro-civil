@@ -4,8 +4,20 @@ const { pool } = require('../db');
 const {
   getPodId, getOllamaBase, setPodId,
   getPodStatus, getAvailableModels,
+  getPullingModels, pullModel,
   VISION_MODELS,
 } = require('../utils/runpod');
+
+// Modelos de visão conhecidos que podem ser instalados
+const CATALOG_MODELS = [
+  { name: 'qwen2.5vl:7b',      label: 'Qwen2.5-VL 7B',     description: 'Recomendado — melhor para documentos históricos' },
+  { name: 'minicpm-v',         label: 'MiniCPM-V',          description: 'Leve e rápido, bom custo-benefício' },
+  { name: 'llama3.2-vision',   label: 'Llama 3.2 Vision',   description: 'Meta, bom reconhecimento de texto em imagens' },
+  { name: 'llava:7b',          label: 'LLaVA 7B',           description: 'Modelo visual clássico, amplamente testado' },
+  { name: 'llava:13b',         label: 'LLaVA 13B',          description: 'Mais preciso, requer mais VRAM (≥16 GB)' },
+  { name: 'bakllava',          label: 'BakLLaVA',           description: 'Baseado em Mistral, bom para OCR' },
+  { name: 'moondream',         label: 'Moondream',          description: 'Ultra leve, para GPUs com pouca VRAM' },
+];
 
 const router = express.Router();
 
@@ -37,6 +49,28 @@ router.put('/', async (req, res) => {
   }
 });
 
+// GET /api/config/catalog  — lista modelos disponíveis para instalação
+router.get('/catalog', (_req, res) => {
+  res.json({ models: CATALOG_MODELS });
+});
+
+// POST /api/config/install-model  — inicia pull de um modelo
+router.post('/install-model', async (req, res) => {
+  const model = (req.body.model || '').trim();
+  if (!model) return res.status(400).json({ error: 'model é obrigatório' });
+
+  if (getPullingModels().includes(model)) {
+    return res.json({ ok: true, status: 'already_pulling', message: `${model} já está sendo instalado` });
+  }
+
+  try {
+    pullModel(model); // dispara em background
+    res.json({ ok: true, status: 'started', message: `Instalação de ${model} iniciada` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/config/validate  — verifica pod + Ollama + modelos
 router.get('/validate', async (_req, res) => {
   const result = {
@@ -49,6 +83,7 @@ router.get('/validate', async (_req, res) => {
     models_required:  VISION_MODELS,
     models_installed: [],
     models_missing:   [],
+    models_pulling:   getPullingModels(),
     ok:               false,
   };
 
@@ -76,6 +111,7 @@ router.get('/validate', async (_req, res) => {
     return !result.models_installed.some(a => a === m || a.startsWith(base + ':'));
   });
 
+  result.models_pulling = getPullingModels();
   result.ok =
     result.pod_status === 'RUNNING' &&
     result.ollama_ok &&
