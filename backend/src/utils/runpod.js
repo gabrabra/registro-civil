@@ -12,7 +12,8 @@ console.log(`[runpod] POD_ID="${_podId}" OLLAMA_BASE="${_ollamaBase}" API_KEY=${
 const AUTO_INSTALL_MODELS = ['qwen2.5vl:7b'];
 const IDLE_STOP_MS  = Number(process.env.RUNPOD_IDLE_STOP_MS) || 15 * 60 * 1000;
 
-const pulling = new Set();
+const pulling      = new Set();
+const pullErrors   = {};
 let idleTimer  = null;
 
 let modelCache = { models: null, ts: 0 };
@@ -170,16 +171,24 @@ function getPullingModels() {
   return [...pulling];
 }
 
+function getPullErrors() {
+  return { ...pullErrors };
+}
+
 function pullModel(modelName) {
   if (pulling.has(modelName)) return;
   pulling.add(modelName);
+  delete pullErrors[modelName];
   console.log(`[runpod] Pulling ${modelName}...`);
   axios.post(`${_ollamaBase}/api/pull`, { name: modelName, stream: false }, { timeout: 1800000 })
     .then(() => {
       console.log(`[runpod] ${modelName} pronto`);
       modelCache = { models: null, ts: 0 };
     })
-    .catch(e => console.error(`[runpod] Pull ${modelName} falhou:`, e.message))
+    .catch(e => {
+      console.error(`[runpod] Pull ${modelName} falhou:`, e.message);
+      pullErrors[modelName] = e.message;
+    })
     .finally(() => pulling.delete(modelName));
 }
 
@@ -189,5 +198,5 @@ module.exports = {
   getAvailableModels,
   getPodId, getOllamaBase, setPodId, loadConfigFromDb,
   getActiveModel, setActiveModel,
-  getPullingModels, pullModel,
+  getPullingModels, getPullErrors, pullModel,
 };

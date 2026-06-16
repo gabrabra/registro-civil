@@ -4,7 +4,7 @@ const { pool } = require('../db');
 const {
   getPodId, getOllamaBase, setPodId,
   getPodStatus, getAvailableModels,
-  getPullingModels, pullModel,
+  getPullingModels, getPullErrors, pullModel,
   getActiveModel, setActiveModel,
 } = require('../utils/runpod');
 
@@ -128,6 +128,7 @@ router.get('/validate', async (_req, res) => {
   });
 
   result.models_pulling = getPullingModels();
+  result.pull_errors    = getPullErrors();
   result.ok =
     result.pod_status === 'RUNNING' &&
     result.ollama_ok &&

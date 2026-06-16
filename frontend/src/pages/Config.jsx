@@ -76,14 +76,6 @@ export default function Config() {
   const [catalog,    setCatalog]    = useState([]);
   const [installMsg, setInstallMsg] = useState(null);
 
-  useEffect(() => {
-    configApi.get().then(d => {
-      setPodId(d.pod_id || '');
-      setActiveModel(d.active_model || 'qwen2.5vl:7b');
-    }).catch(() => {});
-    configApi.catalog().then(d => setCatalog(d.models || [])).catch(() => {});
-  }, []);
-
   const handleValidate = useCallback(async () => {
     setValidating(true);
     try {
@@ -95,6 +87,15 @@ export default function Config() {
       setValidating(false);
     }
   }, []);
+
+  useEffect(() => {
+    configApi.get().then(d => {
+      setPodId(d.pod_id || '');
+      setActiveModel(d.active_model || 'qwen2.5vl:7b');
+    }).catch(() => {});
+    configApi.catalog().then(d => setCatalog(d.models || [])).catch(() => {});
+    handleValidate(); // auto-valida ao abrir a página
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!validation) return;
@@ -328,52 +329,68 @@ export default function Config() {
           </div>
         )}
 
-        <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
-          {catalog.map(m => {
-            const isInstalled = validation?.models_installed?.some(
-              a => a === m.name || a.startsWith(m.name.split(':')[0] + ':')
-            );
-            const isActive = activeModel === m.name ||
-              (!activeModel && m.name === 'qwen2.5vl:7b');
-
-            return (
-              <label
-                key={m.name}
-                className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${
-                  isInstalled ? 'hover:bg-slate-50' : 'opacity-50 cursor-not-allowed'
-                } ${isActive ? 'bg-blue-50' : ''}`}
-              >
-                <input
-                  type="radio"
-                  name="active_model"
-                  value={m.name}
-                  checked={isActive}
-                  disabled={!isInstalled || savingModel}
-                  onChange={() => handleSaveModel(m.name)}
-                  className="accent-blue-600"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-slate-800">{m.label}</span>
-                    {isActive && (
-                      <span className="text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-medium">ativo</span>
-                    )}
-                    {!isInstalled && (
-                      <span className="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-200">não instalado</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-400 font-mono mt-0.5">{m.name}</p>
-                </div>
-              </label>
-            );
-          })}
-        </div>
-
-        {!validation && (
-          <p className="text-xs text-slate-400 mt-3">
-            Clique em "Verificar agora" na seção de validação para ver quais modelos estão instalados.
-          </p>
+        {validating && !validation && (
+          <div className="flex items-center gap-2 text-sm text-slate-400 py-4">
+            <Loader2 className="w-4 h-4 animate-spin" />Verificando modelos instalados…
+          </div>
         )}
+
+        {(validation || !validating) && (
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {catalog.map(m => {
+              const isInstalled = validation?.models_installed?.some(
+                a => a === m.name || a.startsWith(m.name.split(':')[0] + ':')
+              );
+              const isPulling  = validation?.models_pulling?.includes(m.name) || installing[m.name];
+              const pullError  = validation?.pull_errors?.[m.name];
+              const isActive   = activeModel === m.name || (!activeModel && m.name === 'qwen2.5vl:7b');
+              const canSelect  = isInstalled && !savingModel && !!validation;
+
+              return (
+                <label
+                  key={m.name}
+                  className={`flex items-center gap-3 px-4 py-3 transition-colors ${
+                    canSelect ? 'cursor-pointer hover:bg-slate-50' : 'cursor-not-allowed'
+                  } ${isActive && isInstalled ? 'bg-blue-50' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="active_model"
+                    value={m.name}
+                    checked={isActive}
+                    disabled={!canSelect}
+                    onChange={() => handleSaveModel(m.name)}
+                    className="accent-blue-600"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`text-sm font-medium ${isInstalled ? 'text-slate-800' : 'text-slate-400'}`}>{m.label}</span>
+                      {isActive && isInstalled && (
+                        <span className="text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-medium">ativo</span>
+                      )}
+                      {isInstalled && !isActive && (
+                        <span className="text-xs text-green-700 bg-green-50 px-1.5 py-0.5 rounded-full border border-green-200">instalado</span>
+                      )}
+                      {isPulling && (
+                        <span className="text-xs text-blue-600 flex items-center gap-1 animate-pulse">
+                          <Loader2 className="w-3 h-3 animate-spin" />instalando…
+                        </span>
+                      )}
+                      {!isInstalled && !isPulling && validation && (
+                        <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">não instalado</span>
+                      )}
+                      {pullError && (
+                        <span className="text-xs text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full border border-red-200" title={pullError}>falha na instalação</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">{m.name}</p>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        )}
+
         {savingModel && (
           <p className="text-xs text-blue-600 flex items-center gap-1 mt-3">
             <Loader2 className="w-3 h-3 animate-spin" />Salvando modelo…
@@ -403,11 +420,12 @@ export default function Config() {
 
         <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
           {catalog.map(m => {
-            const isPulling   = validation?.models_pulling?.includes(m.name);
-            const isInstalled = validation?.models_installed?.some(
+            const isPulling    = validation?.models_pulling?.includes(m.name);
+            const isInstalled  = validation?.models_installed?.some(
               a => a === m.name || a.startsWith(m.name.split(':')[0] + ':')
             );
             const isInstalling = installing[m.name];
+            const pullError    = validation?.pull_errors?.[m.name];
 
             return (
               <div key={m.name} className="flex items-center justify-between gap-4 px-4 py-3">
@@ -415,6 +433,12 @@ export default function Config() {
                   <p className="text-sm font-medium text-slate-800">{m.label}</p>
                   <p className="text-xs text-slate-500 mt-0.5">{m.description}</p>
                   <p className="text-xs text-slate-400 font-mono mt-0.5">{m.name}</p>
+                  {pullError && (
+                    <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                      <XCircle className="w-3 h-3 flex-shrink-0" />
+                      Erro: {pullError.length > 80 ? pullError.slice(0, 80) + '…' : pullError}
+                    </p>
+                  )}
                 </div>
                 <div className="flex-shrink-0">
                   {isInstalled
@@ -427,9 +451,13 @@ export default function Config() {
                         </span>
                       : <button
                           onClick={() => handleInstall(m.name)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs text-white font-medium transition-colors"
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white font-medium transition-colors ${
+                            pullError
+                              ? 'bg-amber-600 hover:bg-amber-700'
+                              : 'bg-blue-600 hover:bg-blue-700'
+                          }`}
                         >
-                          <Download className="w-3.5 h-3.5" />Instalar
+                          <Download className="w-3.5 h-3.5" />{pullError ? 'Tentar novamente' : 'Instalar'}
                         </button>
                   }
                 </div>
@@ -439,7 +467,7 @@ export default function Config() {
         </div>
 
         <p className="text-xs text-slate-400 mt-3">
-          A instalação ocorre no pod RunPod em segundo plano. Clique em "Verificar agora" para acompanhar.
+          A instalação ocorre no pod RunPod em segundo plano (pode levar 10–30 min dependendo do modelo).
         </p>
       </Card>
 

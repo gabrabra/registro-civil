@@ -207,13 +207,28 @@ router.post('/', upload.single('file'), async (req, res) => {
   const prompt = buildPrompt(livro, recordCount > 1 ? recordCount : null);
   console.log(`[process] Processando imagem completa (${recordCount} registro(s) detectados) → ${model}`);
 
+  const base64 = imageBuffer.toString('base64');
   try {
-    const records = await callModel(model, imageBuffer.toString('base64'), prompt);
+    const records = await callModel(model, base64, prompt);
     console.log(`[process] ${model}: ${records.length} registro(s)`);
     allRegistros = records;
   } catch (e) {
     console.warn(`[process] ${model} falhou:`, e.message);
-    podError = podError || e.message;
+    const fallback = 'qwen2.5vl:7b';
+    if (model !== fallback) {
+      console.log(`[process] Tentando modelo padrão como fallback: ${fallback}`);
+      try {
+        const records = await callModel(fallback, base64, prompt);
+        console.log(`[process] ${fallback} (fallback): ${records.length} registro(s)`);
+        allRegistros = records;
+        podError = `Modelo "${model}" indisponível — processado com "${fallback}"`;
+      } catch (e2) {
+        console.warn(`[process] ${fallback} também falhou:`, e2.message);
+        podError = e.message;
+      }
+    } else {
+      podError = e.message;
+    }
   }
 
   const registros = applyBookConstraints(allRegistros, livro);
