@@ -34,11 +34,12 @@ export const livrosApi = {
 };
 
 export const nascimentosApi = {
-  list:   (params) => http.get('/nascimentos', { params }).then(r => r.data),
-  get:    (id)     => http.get(`/nascimentos/${id}`).then(r => r.data),
-  create: (data)   => http.post('/nascimentos', data).then(r => r.data),
-  update: (id, d)  => http.put(`/nascimentos/${id}`, d).then(r => r.data),
-  remove: (id)     => http.delete(`/nascimentos/${id}`).then(r => r.data),
+  list:      (params) => http.get('/nascimentos', { params }).then(r => r.data),
+  get:       (id)     => http.get(`/nascimentos/${id}`).then(r => r.data),
+  create:    (data)   => http.post('/nascimentos', data).then(r => r.data),
+  update:    (id, d)  => http.put(`/nascimentos/${id}`, d).then(r => r.data),
+  remove:    (id)     => http.delete(`/nascimentos/${id}`).then(r => r.data),
+  localizar: (id)     => http.post(`/nascimentos/${id}/localizar`).then(r => r.data),
 };
 
 export const processApi = {

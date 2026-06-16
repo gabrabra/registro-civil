@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Plus, Upload, Eye, Pencil, Trash2, FolderOpen, ChevronLeft, ChevronRight, X, BookOpen, ArrowLeft } from 'lucide-react';
+import { Search, Plus, Upload, Eye, Pencil, Trash2, FolderOpen, ChevronLeft, ChevronRight, X, BookOpen, ArrowLeft, ScanSearch, Loader2 } from 'lucide-react';
 import { nascimentosApi } from '../../api.js';
+import ImageViewer from '../../components/ImageViewer.jsx';
 
 function Toast({ msg, type, onClose }) {
   useEffect(() => { const t = setTimeout(onClose, 4000); return () => clearTimeout(t); }, []);
@@ -45,46 +46,134 @@ function FileModal({ record, onClose }) {
   );
 }
 
-function ViewModal({ record, onClose }) {
+function ViewModal({ record: initialRecord, onClose }) {
+  const [record,     setRecord]     = useState(initialRecord);
+  const [localizing, setLocalizing] = useState(false);
+  const [locError,   setLocError]   = useState(null);
+
   if (!record) return null;
+
+  const isImage = record.arquivo_tipo && record.arquivo_tipo.includes('image');
+  const hasBbox = record.campos_bbox && Object.keys(record.campos_bbox).length > 0;
+
+  async function handleLocalizar() {
+    setLocalizing(true);
+    setLocError(null);
+    try {
+      const r = await nascimentosApi.localizar(record.id);
+      setRecord(prev => ({ ...prev, campos_bbox: r.campos_bbox }));
+    } catch (err) {
+      setLocError(err?.response?.data?.error || err.message);
+    } finally {
+      setLocalizing(false);
+    }
+  }
+
   const fields = [
-    ['Nome Completo', record.nome_completo],
-    ['Nome da Mãe', record.nome_mae],
-    ['Nome do Pai', record.nome_pai],
+    ['Nome Completo',      record.nome_completo],
+    ['Nome da Mãe',        record.nome_mae],
+    ['Nome do Pai',        record.nome_pai],
     ['Data de Nascimento', record.data_nascimento],
-    ['Ano', record.ano],
-    ['Livro', record.livro],
-    ['Folha', record.folha],
-    ['Nº do Termo', record.numero_termo],
-    ['Município', record.municipio],
-    ['Estado', record.estado],
+    ['Ano',                record.ano],
+    ['Livro',              record.livro],
+    ['Folha',              record.folha],
+    ['Nº do Termo',        record.numero_termo],
+    ['Município',          record.municipio],
+    ['Estado',             record.estado],
   ];
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-5 border-b">
-          <h2 className="font-semibold text-slate-800">Detalhe do Registro</h2>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className={`bg-white rounded-xl shadow-2xl w-full flex flex-col max-h-[92vh] ${isImage ? 'max-w-5xl' : 'max-w-lg'}`}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0">
+          <h2 className="font-semibold text-slate-800">Visualizar Registro</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
         </div>
-        <div className="p-5 grid grid-cols-2 gap-3">
-          {fields.map(([label, val]) => val ? (
-            <div key={label} className="col-span-1">
-              <p className="text-xs text-slate-400 mb-0.5">{label}</p>
-              <p className="text-sm font-medium text-slate-800">{val}</p>
-            </div>
-          ) : null)}
-          {record.observacoes && (
-            <div className="col-span-2">
-              <p className="text-xs text-slate-400 mb-0.5">Observações</p>
-              <p className="text-sm text-slate-600">{record.observacoes}</p>
+
+        <div className={`flex flex-1 overflow-hidden ${isImage ? 'flex-row' : 'flex-col'}`}>
+          {/* Left: image viewer */}
+          {isImage && record.arquivo_url && (
+            <div className="flex-1 overflow-y-auto p-4 bg-slate-50 border-r min-w-0">
+              <ImageViewer
+                src={record.arquivo_url}
+                bbox={record.campos_bbox}
+              />
+
+              {/* Localize button */}
+              <div className="mt-3">
+                {!hasBbox && !localizing && (
+                  <button
+                    onClick={handleLocalizar}
+                    className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors"
+                  >
+                    <ScanSearch className="w-4 h-4" />
+                    Destacar campos na imagem (IA)
+                  </button>
+                )}
+                {localizing && (
+                  <div className="flex items-center gap-2 text-sm text-blue-600">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Analisando imagem… pode levar 30–60s
+                  </div>
+                )}
+                {hasBbox && !localizing && (
+                  <button
+                    onClick={handleLocalizar}
+                    className="flex items-center gap-2 text-xs text-slate-400 hover:text-blue-600 transition-colors"
+                  >
+                    <ScanSearch className="w-3.5 h-3.5" />
+                    Reanalisar posições
+                  </button>
+                )}
+                {locError && <p className="text-xs text-red-500 mt-1">{locError}</p>}
+              </div>
             </div>
           )}
-          {record.confianca && (
-            <div className="col-span-2">
-              <p className="text-xs text-slate-400 mb-0.5">Confiança da IA</p>
-              <ConfidenceBadge value={record.confianca} />
+
+          {/* Right: data fields */}
+          <div className={`overflow-y-auto p-5 ${isImage ? 'w-72 flex-shrink-0' : 'flex-1'}`}>
+            <div className="grid grid-cols-2 gap-3">
+              {fields.map(([label, val]) => val ? (
+                <div key={label} className={label === 'Nome Completo' ? 'col-span-2' : 'col-span-1'}>
+                  <p className="text-xs text-slate-400 mb-0.5">{label}</p>
+                  <p className="text-sm font-medium text-slate-800 break-words">{val}</p>
+                </div>
+              ) : null)}
+
+              {record.observacoes && (
+                <div className="col-span-2">
+                  <p className="text-xs text-slate-400 mb-0.5">Observações</p>
+                  <p className="text-sm text-slate-600">{record.observacoes}</p>
+                </div>
+              )}
+
+              {record.confianca && (
+                <div className="col-span-2">
+                  <p className="text-xs text-slate-400 mb-0.5">Confiança da IA</p>
+                  <ConfidenceBadge value={record.confianca} />
+                </div>
+              )}
             </div>
-          )}
+
+            {/* PDF fallback */}
+            {!isImage && record.arquivo_url && (
+              <div className="mt-4 pt-4 border-t">
+                <a
+                  href={record.arquivo_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  Abrir documento original
+                </a>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
