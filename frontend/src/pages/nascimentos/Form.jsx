@@ -342,7 +342,7 @@ export default function NascimentosForm() {
                 <Loader2 className="w-5 h-5 text-violet-600 animate-spin flex-shrink-0" />
                 <div>
                   <p className="text-sm font-medium text-violet-800">{processMsg}</p>
-                  <p className="text-xs text-violet-600 mt-0.5">Aguarde — 3 modelos de IA analisando o documento</p>
+                  <p className="text-xs text-violet-600 mt-0.5">Aguarde — IA analisando o documento</p>
                 </div>
               </div>
             )}
