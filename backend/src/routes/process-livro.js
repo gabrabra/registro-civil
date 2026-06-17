@@ -39,20 +39,27 @@ async function callModelForCoverExternal(base64) {
   const { url, key, model } = getExtConfig();
   if (!url || !key || !model) throw new Error('API externa não configurada');
 
-  const resp = await axios.post(`${url.replace(/\/$/, '')}/chat/completions`, {
-    model,
-    max_tokens: 512,
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'text', text: COVER_PROMPT },
-        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
-      ]
-    }]
-  }, {
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    timeout: 60000
-  });
+  let resp;
+  try {
+    resp = await axios.post(`${url.replace(/\/$/, '')}/chat/completions`, {
+      model,
+      max_tokens: 512,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: COVER_PROMPT },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
+        ]
+      }]
+    }, {
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      timeout: 60000
+    });
+  } catch (err) {
+    const detail = err.response?.data?.error?.message || err.response?.data?.error || JSON.stringify(err.response?.data) || err.message;
+    console.error(`[callModelForCoverExt] ERRO ${err.response?.status}: ${detail}`);
+    throw new Error(`API externa (${model}): ${detail}`);
+  }
 
   const rawContent = resp.data?.choices?.[0]?.message?.content || '';
   console.log(`[callModelForCoverExt] ${model}: ${rawContent.length} chars — "${rawContent.slice(0, 150).replace(/\n/g, '\\n')}"`);
