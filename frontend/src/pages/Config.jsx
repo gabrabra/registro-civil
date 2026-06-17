@@ -281,7 +281,7 @@ export default function Config() {
                     }`}
                   >
                     <input type="radio" name="extTipo" value={opt.value} checked={extTipo === opt.value}
-                      onChange={() => { setExtTipo(opt.value); setExtModel(MODELOS_POR_TIPO[opt.value]?.[0] || ''); }}
+                      onChange={() => { setExtTipo(opt.value); setExtModel(MODELOS_POR_TIPO[opt.value]?.[0] || ''); setExtKeySet(false); }}
                       className="accent-blue-600" />
                     {opt.label}
                   </label>

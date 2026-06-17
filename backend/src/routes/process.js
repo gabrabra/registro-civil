@@ -5,7 +5,7 @@ const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
 const { pool } = require('../db');
-const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getOllamaBase, getActiveModel, getProvider, getExtConfig } = require('../utils/runpod');
+const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getOllamaBase, getActiveModel, getProvider, getExtConfig, loadConfigFromDb } = require('../utils/runpod');
 const { detectRecordCount } = require('../utils/imageSegment');
 const router  = express.Router();
 
@@ -293,6 +293,9 @@ router.post('/', upload.single('file'), async (req, res) => {
   const isImage     = /image\/(jpeg|png|webp|tiff)/.test(req.file.mimetype);
 
   console.log(`[process] Nova requisição — tipo=${tipo} arquivo=${req.file.originalname} livro_id=${livroId} isImage=${isImage}`);
+
+  // Always reload config from DB to pick up any changes saved after startup
+  await loadConfigFromDb(pool).catch(() => {});
 
   const provider = getProvider();
   const livro    = tipo === 'nascimento' ? await getLivro(livroId) : null;
