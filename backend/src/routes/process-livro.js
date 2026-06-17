@@ -4,7 +4,7 @@ const axios   = require('axios');
 const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
-const { ensurePodRunning, scheduleIdleStop, getOllamaBase, getActiveModel } = require('../utils/runpod');
+const { ensurePodRunning, scheduleIdleStop, getOllamaBase, getActiveModel, getProvider, getExtConfig } = require('../utils/runpod');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -34,6 +34,34 @@ const COVER_PROMPT =
   '  "municipio": "nome do município ou null",\n' +
   '  "estado": "sigla UF ex: PE ou null"\n' +
   '}';
+
+async function callModelForCoverExternal(base64) {
+  const { url, key, model } = getExtConfig();
+  if (!url || !key || !model) throw new Error('API externa não configurada');
+
+  const resp = await axios.post(`${url.replace(/\/$/, '')}/chat/completions`, {
+    model,
+    max_tokens: 512,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: COVER_PROMPT },
+        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
+      ]
+    }]
+  }, {
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    timeout: 60000
+  });
+
+  const rawContent = resp.data?.choices?.[0]?.message?.content || '';
+  console.log(`[callModelForCoverExt] ${model}: ${rawContent.length} chars — "${rawContent.slice(0, 150).replace(/\n/g, '\\n')}"`);
+
+  const content = rawContent.replace(/```json\n?|\n?```/g, '').trim();
+  const match = content.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error(`${model}: JSON não encontrado na resposta da capa`);
+  return JSON.parse(match[0]);
+}
 
 async function callModelForCover(modelName, base64) {
   let resp;
@@ -75,15 +103,20 @@ router.post('/livro-capa', upload.single('file'), async (req, res) => {
     return res.status(503).json({ erro: 'Pod indisponível: ' + err.message });
   }
 
-  const model = getActiveModel();
-  console.log(`[process-livro] Modelo ativo: ${model}`);
+  const provider = getProvider();
+  const model    = getActiveModel();
+  console.log(`[process-livro] Provider: ${provider}, Modelo: ${model}`);
 
   let coverData = null;
   try {
-    coverData = await callModelForCover(model, base64);
-    console.log(`[process-livro] ${model}: capa OK`);
+    if (provider === 'openai') {
+      coverData = await callModelForCoverExternal(base64);
+    } else {
+      coverData = await callModelForCover(model, base64);
+    }
+    console.log(`[process-livro] capa OK`);
   } catch (e) {
-    console.warn(`[process-livro] ${model}: capa falhou:`, e.message);
+    console.warn(`[process-livro] capa falhou:`, e.message);
   }
 
   scheduleIdleStop();

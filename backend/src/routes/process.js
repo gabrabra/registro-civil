@@ -5,7 +5,7 @@ const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
 const { pool } = require('../db');
-const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getOllamaBase, getActiveModel } = require('../utils/runpod');
+const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getOllamaBase, getActiveModel, getProvider, getExtConfig } = require('../utils/runpod');
 const { detectRecordCount } = require('../utils/imageSegment');
 const router  = express.Router();
 
@@ -127,6 +127,41 @@ function applyBookConstraints(registros, livro) {
   });
 }
 
+async function callModelExternal(base64, prompt) {
+  const { url, key, model } = getExtConfig();
+  if (!url || !key || !model) throw new Error('API externa não configurada (preencha URL, chave e modelo nas Configurações)');
+
+  const resp = await axios.post(`${url.replace(/\/$/, '')}/chat/completions`, {
+    model,
+    max_tokens: 2048,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
+      ]
+    }]
+  }, {
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    timeout: 120000
+  });
+
+  const rawContent = resp.data?.choices?.[0]?.message?.content || '';
+  console.log(`[callModelExt] ${model}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
+
+  const content = rawContent.replace(/```json\n?|\n?```/g, '').trim();
+  try {
+    const arrMatch = content.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      const parsed = JSON.parse(arrMatch[0]);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    }
+    const objMatch = content.match(/\{[\s\S]*\}/);
+    if (objMatch) return [JSON.parse(objMatch[0])];
+  } catch (_) {}
+  return [];
+}
+
 async function callModel(modelName, base64, prompt) {
   let resp;
   try {
@@ -167,14 +202,9 @@ router.post('/', upload.single('file'), async (req, res) => {
 
   console.log(`[process] Nova requisição — arquivo=${req.file.originalname} livro_id=${livroId} isImage=${isImage}`);
 
-  let podError = null;
-  try { await ensurePodRunning(); } catch (err) {
-    podError = err.message;
-    console.warn('[process] ensurePodRunning falhou:', err.message);
-  }
-
-  const livro = await getLivro(livroId);
-  const model = getActiveModel();
+  const provider = getProvider();
+  const livro    = await getLivro(livroId);
+  const model    = getActiveModel();
 
   const arquivoInfo = {
     arquivo_path: filePath,
@@ -183,40 +213,59 @@ router.post('/', upload.single('file'), async (req, res) => {
     arquivo_url:  `/files/${req.file.filename}`
   };
 
-  console.log(`[process] Modelo ativo: ${model}`);
-
   let allRegistros = [];
-
-  // Detect number of records in page (images only)
-  const recordCount = isImage
-    ? await detectRecordCount(imageBuffer, model, getOllamaBase())
-    : 1;
-
-  // Always process the FULL image — splitting causes partial records that fool the model
-  const prompt = buildPrompt(livro, recordCount > 1 ? recordCount : null);
-  console.log(`[process] Processando imagem completa (${recordCount} registro(s) detectados) → ${model}`);
+  let podError     = null;
 
   const base64 = imageBuffer.toString('base64');
-  try {
-    const records = await callModel(model, base64, prompt);
-    console.log(`[process] ${model}: ${records.length} registro(s)`);
-    allRegistros = records;
-  } catch (e) {
-    console.warn(`[process] ${model} falhou:`, e.message);
-    const fallback = 'qwen2.5vl:7b';
-    if (model !== fallback) {
-      console.log(`[process] Tentando modelo padrão como fallback: ${fallback}`);
-      try {
-        const records = await callModel(fallback, base64, prompt);
-        console.log(`[process] ${fallback} (fallback): ${records.length} registro(s)`);
-        allRegistros = records;
-        podError = `Modelo "${model}" indisponível — processado com "${fallback}"`;
-      } catch (e2) {
-        console.warn(`[process] ${fallback} também falhou:`, e2.message);
+  const prompt  = buildPrompt(livro, null); // count hint added below if needed
+
+  if (provider === 'openai') {
+    console.log(`[process] API externa: ${getExtConfig().model}`);
+    try {
+      allRegistros = await callModelExternal(base64, prompt);
+      console.log(`[process] API externa: ${allRegistros.length} registro(s)`);
+    } catch (e) {
+      console.warn('[process] API externa falhou:', e.message);
+      podError = e.message;
+    }
+  } else {
+    // --- Ollama / RunPod ---
+    try { await ensurePodRunning(); } catch (err) {
+      podError = err.message;
+      console.warn('[process] ensurePodRunning falhou:', err.message);
+    }
+
+    console.log(`[process] Modelo ativo: ${model}`);
+
+    // Detect number of records in page (images only)
+    const recordCount = isImage
+      ? await detectRecordCount(imageBuffer, model, getOllamaBase())
+      : 1;
+
+    const promptWithHint = buildPrompt(livro, recordCount > 1 ? recordCount : null);
+    console.log(`[process] Processando imagem completa (${recordCount} registro(s) detectados) → ${model}`);
+
+    try {
+      const records = await callModel(model, base64, promptWithHint);
+      console.log(`[process] ${model}: ${records.length} registro(s)`);
+      allRegistros = records;
+    } catch (e) {
+      console.warn(`[process] ${model} falhou:`, e.message);
+      const fallback = 'qwen2.5vl:7b';
+      if (model !== fallback) {
+        console.log(`[process] Tentando modelo padrão como fallback: ${fallback}`);
+        try {
+          const records = await callModel(fallback, base64, promptWithHint);
+          console.log(`[process] ${fallback} (fallback): ${records.length} registro(s)`);
+          allRegistros = records;
+          podError = `Modelo "${model}" indisponível — processado com "${fallback}"`;
+        } catch (e2) {
+          console.warn(`[process] ${fallback} também falhou:`, e2.message);
+          podError = e.message;
+        }
+      } else {
         podError = e.message;
       }
-    } else {
-      podError = e.message;
     }
   }
 

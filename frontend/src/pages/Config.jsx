@@ -3,7 +3,7 @@ import { configApi } from '../api.js';
 import {
   Settings, Save, Loader2,
   CheckCircle2, XCircle, AlertCircle, RefreshCw,
-  Download, Package, Cpu,
+  Download, Package, Cpu, Globe,
 } from 'lucide-react';
 
 function Card({ children, className = '' }) {
@@ -76,6 +76,15 @@ export default function Config() {
   const [catalog,    setCatalog]    = useState([]);
   const [installMsg, setInstallMsg] = useState(null);
 
+  // External API provider
+  const [provider,    setProvider]    = useState('ollama');
+  const [extUrl,      setExtUrl]      = useState('');
+  const [extModel,    setExtModel]    = useState('');
+  const [extKey,      setExtKey]      = useState('');
+  const [extKeySet,   setExtKeySet]   = useState(false);
+  const [savingExt,   setSavingExt]   = useState(false);
+  const [saveExtMsg,  setSaveExtMsg]  = useState(null);
+
   const handleValidate = useCallback(async () => {
     setValidating(true);
     try {
@@ -92,6 +101,10 @@ export default function Config() {
     configApi.get().then(d => {
       setPodId(d.pod_id || '');
       setActiveModel(d.active_model || 'qwen2.5vl:7b');
+      setProvider(d.provider || 'ollama');
+      setExtUrl(d.ext_url || '');
+      setExtModel(d.ext_model || '');
+      setExtKeySet(d.ext_key_set || false);
     }).catch(() => {});
     configApi.catalog().then(d => setCatalog(d.models || [])).catch(() => {});
     handleValidate(); // auto-valida ao abrir a página
@@ -134,6 +147,38 @@ export default function Config() {
     }
   }
 
+  async function handleSwitchProvider(p) {
+    setProvider(p);
+    setSaveExtMsg(null);
+    try {
+      await configApi.saveProvider({ ai_provider: p });
+      setValidation(null);
+      setTimeout(handleValidate, 300);
+    } catch (e) {
+      console.error('Erro ao salvar provider:', e.message);
+    }
+  }
+
+  async function handleSaveExtConfig(e) {
+    e.preventDefault();
+    setSavingExt(true);
+    setSaveExtMsg(null);
+    try {
+      const payload = { ai_provider: 'openai', ai_external_url: extUrl.trim(), ai_external_model: extModel.trim() };
+      if (extKey.trim()) payload.ai_external_key = extKey.trim();
+      await configApi.saveProvider(payload);
+      setSaveExtMsg({ ok: true, text: 'Configuração salva com sucesso.' });
+      setExtKeySet(true);
+      setExtKey('');
+      setValidation(null);
+      setTimeout(handleValidate, 300);
+    } catch (err) {
+      setSaveExtMsg({ ok: false, text: err?.response?.data?.error || err.message });
+    } finally {
+      setSavingExt(false);
+    }
+  }
+
   async function handleInstall(modelName) {
     setInstalling(p => ({ ...p, [modelName]: true }));
     setInstallMsg(null);
@@ -162,8 +207,105 @@ export default function Config() {
         </div>
       </div>
 
-      {/* Pod ID */}
+      {/* AI Provider */}
       <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <Globe className="w-4 h-4 text-slate-500" />
+          <SectionTitle>Provedor de IA</SectionTitle>
+        </div>
+
+        <div className="space-y-2 mb-4">
+          {[
+            { value: 'ollama', label: 'Ollama (RunPod)', desc: 'Modelos rodando no seu pod RunPod — sem custo por chamada' },
+            { value: 'openai', label: 'API Externa',     desc: 'DeepSeek, OpenAI, Together AI — qualquer API compatível com OpenAI' },
+          ].map(opt => (
+            <label
+              key={opt.value}
+              className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${
+                provider === opt.value ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <input
+                type="radio"
+                name="provider"
+                value={opt.value}
+                checked={provider === opt.value}
+                onChange={() => handleSwitchProvider(opt.value)}
+                className="accent-blue-600 mt-0.5"
+              />
+              <div>
+                <p className="text-sm font-medium text-slate-800">{opt.label}</p>
+                <p className="text-xs text-slate-500">{opt.desc}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        {provider === 'openai' && (
+          <form onSubmit={handleSaveExtConfig} className="space-y-3 border-t border-slate-200 pt-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">URL Base</label>
+              <input
+                type="text"
+                value={extUrl}
+                onChange={e => setExtUrl(e.target.value)}
+                placeholder="https://api.deepseek.com/v1"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono placeholder-slate-400
+                           focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Modelo</label>
+              <input
+                type="text"
+                value={extModel}
+                onChange={e => setExtModel(e.target.value)}
+                placeholder="deepseek-vl2  ou  gpt-4o-mini"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono placeholder-slate-400
+                           focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Chave API</label>
+              <input
+                type="password"
+                value={extKey}
+                onChange={e => setExtKey(e.target.value)}
+                placeholder={extKeySet ? '(chave já salva — deixe em branco para manter)' : 'sk-…'}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono placeholder-slate-400
+                           focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white"
+              />
+              {extKeySet && !extKey && (
+                <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />Chave configurada
+                </p>
+              )}
+            </div>
+
+            {saveExtMsg && (
+              <div className={`flex items-start gap-2 text-sm px-3 py-2.5 rounded-lg border ${
+                saveExtMsg.ok ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'
+              }`}>
+                {saveExtMsg.ok ? <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /> : <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
+                <span>{saveExtMsg.text}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={savingExt || !extUrl.trim() || !extModel.trim()}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50
+                         rounded-lg text-sm font-medium text-white transition-colors"
+            >
+              {savingExt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Salvar
+            </button>
+          </form>
+        )}
+      </Card>
+
+      {/* Pod ID */}
+      <Card className={provider === 'openai' ? 'opacity-50 pointer-events-none' : ''}>
         <SectionTitle>RunPod</SectionTitle>
         <form onSubmit={handleSave} className="space-y-4">
           <div>
@@ -249,18 +391,22 @@ export default function Config() {
               </span>
             </div>
 
-            {/* Pod */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Pod RunPod</p>
-              <div className="flex items-center gap-2">
-                <StatusBadge ok={validation.pod_status === 'RUNNING'} label={podStatusLabel[validation.pod_status] ?? validation.pod_status} />
-                {validation.pod_error && <span className="text-xs text-slate-400">({validation.pod_error})</span>}
+            {/* Pod — only for Ollama */}
+            {validation.provider !== 'openai' && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Pod RunPod</p>
+                <div className="flex items-center gap-2">
+                  <StatusBadge ok={validation.pod_status === 'RUNNING'} label={podStatusLabel[validation.pod_status] ?? validation.pod_status} />
+                  {validation.pod_error && <span className="text-xs text-slate-400">({validation.pod_error})</span>}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Ollama */}
+            {/* Ollama / External API */}
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Ollama</p>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                {validation.provider === 'openai' ? 'API Externa' : 'Ollama'}
+              </p>
               <div className="space-y-1">
                 <StatusBadge ok={validation.ollama_ok} label={validation.ollama_ok ? 'Acessível' : 'Inacessível'} />
                 <p className="text-xs text-slate-400 font-mono">{validation.ollama_url}</p>
@@ -268,31 +414,33 @@ export default function Config() {
               </div>
             </div>
 
-            {/* Required models */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Modelos necessários</p>
-              <div className="border border-slate-200 rounded-lg px-4 py-1 bg-slate-50">
-                {validation.models_required.map(m => (
-                  <ModelRow
-                    key={m}
-                    name={m}
-                    installed={!validation.models_missing.includes(m)}
-                    pulling={validation.models_pulling?.includes(m)}
-                    installing={installing[m]}
-                    onInstall={handleInstall}
-                  />
-                ))}
+            {/* Required models — only for Ollama */}
+            {validation.provider !== 'openai' && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Modelos necessários</p>
+                <div className="border border-slate-200 rounded-lg px-4 py-1 bg-slate-50">
+                  {validation.models_required.map(m => (
+                    <ModelRow
+                      key={m}
+                      name={m}
+                      installed={!validation.models_missing.includes(m)}
+                      pulling={validation.models_pulling?.includes(m)}
+                      installing={installing[m]}
+                      onInstall={handleInstall}
+                    />
+                  ))}
+                </div>
+                {(validation.models_pulling?.length > 0) && (
+                  <p className="text-xs text-blue-600 flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Instalação em andamento — verificando a cada 15s automaticamente
+                  </p>
+                )}
               </div>
-              {(validation.models_pulling?.length > 0) && (
-                <p className="text-xs text-blue-600 flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  Instalação em andamento — verificando a cada 15s automaticamente
-                </p>
-              )}
-            </div>
+            )}
 
-            {/* All installed */}
-            {validation.models_installed.length > 0 && (
+            {/* All installed — only for Ollama */}
+            {validation.provider !== 'openai' && validation.models_installed.length > 0 && (
               <details className="text-xs text-slate-500">
                 <summary className="cursor-pointer hover:text-slate-700 transition-colors font-medium">
                   Ver todos os modelos instalados ({validation.models_installed.length})
@@ -306,8 +454,8 @@ export default function Config() {
         )}
       </Card>
 
-      {/* Active model selector */}
-      <Card>
+      {/* Active model selector — only for Ollama */}
+      {provider === 'ollama' && <Card>
         <div className="flex items-center gap-2 mb-4">
           <Cpu className="w-4 h-4 text-slate-500" />
           <SectionTitle>Modelo de processamento</SectionTitle>
@@ -396,10 +544,10 @@ export default function Config() {
             <Loader2 className="w-3 h-3 animate-spin" />Salvando modelo…
           </p>
         )}
-      </Card>
+      </Card>}
 
-      {/* Install additional models */}
-      <Card>
+      {/* Install additional models — only for Ollama */}
+      {provider === 'ollama' && <Card>
         <div className="flex items-center gap-2 mb-4">
           <Package className="w-4 h-4 text-slate-500" />
           <SectionTitle>Instalar modelos adicionais</SectionTitle>
@@ -469,7 +617,7 @@ export default function Config() {
         <p className="text-xs text-slate-400 mt-3">
           A instalação ocorre no pod RunPod em segundo plano (pode levar 10–30 min dependendo do modelo).
         </p>
-      </Card>
+      </Card>}
 
       {/* About */}
       <Card>
@@ -480,8 +628,14 @@ export default function Config() {
             <span className="text-slate-800 font-medium">1.1</span>
           </div>
           <div className="flex justify-between">
+            <span className="text-slate-500">Provedor</span>
+            <span className="text-slate-800 font-medium">{provider === 'openai' ? 'API Externa' : 'Ollama (RunPod)'}</span>
+          </div>
+          <div className="flex justify-between">
             <span className="text-slate-500">Modelo ativo</span>
-            <span className="text-slate-800 font-mono text-xs">{activeModel || 'qwen2.5vl:7b'}</span>
+            <span className="text-slate-800 font-mono text-xs">
+              {provider === 'openai' ? (extModel || '—') : (activeModel || 'qwen2.5vl:7b')}
+            </span>
           </div>
         </div>
       </Card>

@@ -76,6 +76,7 @@ export const configApi = {
   get:          ()             => http.get('/config').then(r => r.data),
   save:         (pod_id)       => http.put('/config', { pod_id }).then(r => r.data),
   saveModel:    (active_model) => http.put('/config', { active_model }).then(r => r.data),
+  saveProvider: (data)         => http.put('/config', data).then(r => r.data),
   validate:     ()             => http.get('/config/validate').then(r => r.data),
   catalog:      ()             => http.get('/config/catalog').then(r => r.data),
   installModel: (model)        => http.post('/config/install-model', { model }).then(r => r.data),

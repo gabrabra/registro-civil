@@ -6,6 +6,7 @@ const {
   getPodStatus, getAvailableModels,
   getPullingModels, getPullErrors, pullModel,
   getActiveModel, setActiveModel,
+  getProvider, setProvider, getExtConfig, setExtConfig,
 } = require('../utils/runpod');
 
 // Modelos de visão conhecidos que podem ser instalados
@@ -23,41 +24,56 @@ const router = express.Router();
 
 // GET /api/config  — retorna config atual
 router.get('/', (_req, res) => {
+  const ext = getExtConfig();
   res.json({
     pod_id:       getPodId(),
     ollama_url:   getOllamaBase(),
     api_key_set:  Boolean(process.env.RUNPOD_API_KEY),
     active_model: getActiveModel(),
+    provider:     getProvider(),
+    ext_url:      ext.url,
+    ext_model:    ext.model,
+    ext_key_set:  Boolean(ext.key),
   });
 });
 
-// PUT /api/config  — altera pod ID e/ou modelo ativo, persiste no banco
+// PUT /api/config  — altera configurações, persiste no banco
 router.put('/', async (req, res) => {
-  const newId    = (req.body.pod_id      || '').trim();
-  const newModel = (req.body.active_model || '').trim();
+  const newId       = (req.body.pod_id           || '').trim();
+  const newModel    = (req.body.active_model      || '').trim();
+  const newProvider = (req.body.ai_provider       || '').trim();
+  const newExtUrl   = req.body.ai_external_url;
+  const newExtKey   = req.body.ai_external_key;
+  const newExtModel = req.body.ai_external_model;
 
-  if (!newId && !newModel) return res.status(400).json({ error: 'pod_id ou active_model é obrigatório' });
+  const hasChange = newId || newModel || newProvider
+    || newExtUrl !== undefined || newExtKey !== undefined || newExtModel !== undefined;
+  if (!hasChange) return res.status(400).json({ error: 'Nenhum campo para alterar' });
+
+  async function upsert(chave, valor) {
+    await pool.query(
+      `INSERT INTO configuracoes (chave, valor)
+       VALUES ($1, $2)
+       ON CONFLICT (chave) DO UPDATE SET valor = $2, atualizado_em = NOW()`,
+      [chave, valor]
+    );
+  }
 
   try {
-    if (newId) {
-      await pool.query(
-        `INSERT INTO configuracoes (chave, valor)
-         VALUES ('runpod_pod_id', $1)
-         ON CONFLICT (chave) DO UPDATE SET valor = $1, atualizado_em = NOW()`,
-        [newId]
-      );
-      setPodId(newId);
-    }
-    if (newModel) {
-      await pool.query(
-        `INSERT INTO configuracoes (chave, valor)
-         VALUES ('ai_model', $1)
-         ON CONFLICT (chave) DO UPDATE SET valor = $1, atualizado_em = NOW()`,
-        [newModel]
-      );
-      setActiveModel(newModel);
-    }
-    res.json({ ok: true, pod_id: getPodId(), ollama_url: getOllamaBase(), active_model: getActiveModel() });
+    if (newId)                      { await upsert('runpod_pod_id', newId);     setPodId(newId); }
+    if (newModel)                   { await upsert('ai_model', newModel);       setActiveModel(newModel); }
+    if (newProvider)                { await upsert('ai_provider', newProvider); setProvider(newProvider); }
+    if (newExtUrl   !== undefined)  { await upsert('ai_external_url',   newExtUrl   || ''); setExtConfig({ url:   newExtUrl }); }
+    if (newExtKey   !== undefined && newExtKey !== '') {
+                                      await upsert('ai_external_key',   newExtKey);          setExtConfig({ key:   newExtKey }); }
+    if (newExtModel !== undefined)  { await upsert('ai_external_model', newExtModel || ''); setExtConfig({ model: newExtModel }); }
+
+    const ext = getExtConfig();
+    res.json({
+      ok: true,
+      pod_id: getPodId(), ollama_url: getOllamaBase(), active_model: getActiveModel(),
+      provider: getProvider(), ext_url: ext.url, ext_model: ext.model, ext_key_set: Boolean(ext.key),
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -85,10 +101,13 @@ router.post('/install-model', async (req, res) => {
   }
 });
 
-// GET /api/config/validate  — verifica pod + Ollama + modelos
+// GET /api/config/validate  — verifica pod + Ollama + modelos (ou API externa)
 router.get('/validate', async (_req, res) => {
+  const provider    = getProvider();
   const activeModel = getActiveModel();
+
   const result = {
+    provider,
     pod_id:           getPodId(),
     ollama_url:       getOllamaBase(),
     active_model:     activeModel,
@@ -100,8 +119,38 @@ router.get('/validate', async (_req, res) => {
     models_installed: [],
     models_missing:   [],
     models_pulling:   getPullingModels(),
+    pull_errors:      getPullErrors(),
     ok:               false,
   };
+
+  if (provider === 'openai') {
+    // Validate external API: call /models endpoint (cheap, no inference cost)
+    const { url, key, model } = getExtConfig();
+    result.ollama_url    = url || '';
+    result.models_required = model ? [model] : [];
+    result.pod_status    = 'N/A';
+
+    if (!url || !key || !model) {
+      result.ollama_error = 'Configuração incompleta — preencha URL, chave e modelo nas configurações.';
+    } else {
+      try {
+        await axios.get(`${url.replace(/\/$/, '')}/models`, {
+          headers: { Authorization: `Bearer ${key}` },
+          timeout: 10000
+        });
+        result.ollama_ok        = true;
+        result.models_installed = [model];
+        result.models_missing   = [];
+      } catch (e) {
+        const msg = e.response?.data?.error?.message || e.response?.data?.error || e.message;
+        result.ollama_error = String(msg);
+      }
+    }
+    result.ok = result.ollama_ok;
+    return res.json(result);
+  }
+
+  // --- Ollama / RunPod flow ---
 
   // 1. Pod status via RunPod API
   try {

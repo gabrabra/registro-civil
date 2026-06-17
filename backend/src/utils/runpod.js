@@ -6,6 +6,12 @@ let _podId        = process.env.RUNPOD_POD_ID || 'k0vwks9huazlyg';
 let _ollamaBase   = process.env.RUNPOD_OLLAMA_URL || `https://${_podId}-11434.proxy.runpod.net`;
 let _activeModel  = 'qwen2.5vl:7b';
 
+// External API provider (OpenAI-compatible)
+let _provider  = 'ollama';   // 'ollama' | 'openai'
+let _extUrl    = '';
+let _extKey    = '';
+let _extModel  = '';
+
 console.log(`[runpod] POD_ID="${_podId}" OLLAMA_BASE="${_ollamaBase}" API_KEY=${API_KEY ? 'SET' : 'NOT SET'}`);
 
 // Only this model is auto-installed on pod startup
@@ -21,6 +27,18 @@ let modelCache = { models: null, ts: 0 };
 function getPodId()       { return _podId; }
 function getOllamaBase()  { return _ollamaBase; }
 function getActiveModel() { return _activeModel; }
+function getProvider()    { return _provider; }
+function getExtConfig()   { return { url: _extUrl, key: _extKey, model: _extModel }; }
+
+function setProvider(p) {
+  _provider = p || 'ollama';
+  console.log(`[runpod] Provider → "${_provider}"`);
+}
+function setExtConfig({ url, key, model } = {}) {
+  if (url   !== undefined) _extUrl   = url   || '';
+  if (key   !== undefined) _extKey   = key   || '';
+  if (model !== undefined) _extModel = model || '';
+}
 
 function setPodId(newId) {
   _podId = newId;
@@ -38,16 +56,16 @@ function setActiveModel(modelName) {
 
 async function loadConfigFromDb(pool) {
   try {
-    const r = await pool.query("SELECT chave, valor FROM configuracoes WHERE chave IN ('runpod_pod_id', 'ai_model')");
+    const r = await pool.query(
+      "SELECT chave, valor FROM configuracoes WHERE chave IN ('runpod_pod_id','ai_model','ai_provider','ai_external_url','ai_external_key','ai_external_model')"
+    );
     for (const row of r.rows) {
-      if (row.chave === 'runpod_pod_id' && row.valor) {
-        setPodId(row.valor);
-        console.log(`[runpod] Pod ID carregado do banco: ${_podId}`);
-      }
-      if (row.chave === 'ai_model' && row.valor) {
-        setActiveModel(row.valor);
-        console.log(`[runpod] Modelo ativo carregado do banco: ${_activeModel}`);
-      }
+      if (row.chave === 'runpod_pod_id'    && row.valor) { setPodId(row.valor);      console.log(`[runpod] Pod ID carregado do banco: ${_podId}`); }
+      if (row.chave === 'ai_model'         && row.valor) { setActiveModel(row.valor); console.log(`[runpod] Modelo ativo carregado do banco: ${_activeModel}`); }
+      if (row.chave === 'ai_provider'      && row.valor) { setProvider(row.valor); }
+      if (row.chave === 'ai_external_url'  && row.valor) { _extUrl   = row.valor; }
+      if (row.chave === 'ai_external_key'  && row.valor) { _extKey   = row.valor; }
+      if (row.chave === 'ai_external_model'&& row.valor) { _extModel = row.valor; }
     }
   } catch (e) {
     console.warn('[runpod] Não foi possível carregar config do banco:', e.message);
@@ -198,5 +216,6 @@ module.exports = {
   getAvailableModels,
   getPodId, getOllamaBase, setPodId, loadConfigFromDb,
   getActiveModel, setActiveModel,
+  getProvider, setProvider, getExtConfig, setExtConfig,
   getPullingModels, getPullErrors, pullModel,
 };
