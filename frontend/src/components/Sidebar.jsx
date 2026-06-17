@@ -114,7 +114,7 @@ export default function Sidebar() {
       <div className="px-5 py-5 border-b border-white/10">
         <div className="flex items-center gap-2">
           <BookHeart className="w-6 h-6 text-blue-400" />
-          <span className="text-white font-semibold text-base tracking-wide">Registro Civil</span>
+          <span className="text-white font-semibold text-base tracking-wide">CartorIA</span>
         </div>
       </div>
 
