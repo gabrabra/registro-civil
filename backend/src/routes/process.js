@@ -27,26 +27,16 @@ const upload = multer({
   }
 });
 
-function parseNDJSON(raw) {
-  let text = '';
-  if (typeof raw === 'string') {
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      try { text += JSON.parse(line)?.message?.content ?? ''; } catch (_) {}
-    }
-  } else if (raw?.message?.content) {
-    text = raw.message.content;
-  }
-  return text;
-}
-
 const BASE_PROMPT =
-  'Você é especialista em leitura de documentos de cartório brasileiro.\n\n' +
-  'Analise esta imagem de livro de registro civil. Pode conter UM ou MAIS registros de nascimento na mesma página.\n\n' +
-  'Responda SOMENTE com um array JSON válido, um objeto por registro encontrado:\n\n' +
+  'Você é especialista em leitura de documentos manuscritos históricos de cartório brasileiro.\n\n' +
+  'Analise esta imagem de página de livro de registro civil de nascimento (século XIX ou XX).\n' +
+  'O texto pode ser manuscrito cursivo antigo, desbotado ou parcialmente ilegível — faça seu melhor esforço.\n\n' +
+  'PASSO 1 — Leitura: Descreva brevemente o que você vê e transcreva os nomes e datas que consegue ler.\n' +
+  'PASSO 2 — Extração: Com base no que leu, extraia os dados de cada registro de nascimento.\n\n' +
+  'Escreva o resultado como array JSON (um objeto por registro encontrado):\n\n' +
   '[\n' +
   '  {\n' +
-  '    "nome_completo": "nome completo do registrado",\n' +
+  '    "nome_completo": "nome completo do registrado ou null",\n' +
   '    "nome_mae": "nome da mãe ou null",\n' +
   '    "nome_pai": "nome do pai ou null",\n' +
   '    "data_nascimento": "YYYY-MM-DD ou null",\n' +
@@ -55,11 +45,10 @@ const BASE_PROMPT =
   '    "municipio": "nome do município ou null",\n' +
   '    "estado": "sigla UF ex: PE ou null",\n' +
   '    "confianca": "alta | media | baixa",\n' +
-  '    "observacoes": "dificuldades ou informações adicionais ou null"\n' +
+  '    "observacoes": "dificuldades de leitura ou informações adicionais ou null"\n' +
   '  }\n' +
   ']\n\n' +
-  'Se houver apenas um registro, retorne um array com um único elemento.\n' +
-  'Se não houver registros de nascimento visíveis, retorne um array vazio: []';
+  'Se não houver registros de nascimento visíveis, retorne: []';
 
 function buildPrompt(livro, recordCountHint) {
   if (!livro && !recordCountHint) return BASE_PROMPT;
@@ -139,23 +128,23 @@ function applyBookConstraints(registros, livro) {
 }
 
 async function callModel(modelName, base64, prompt) {
-  let raw = '';
+  let resp;
   try {
-    const resp = await axios.post(`${getOllamaBase()}/api/chat`, {
+    resp = await axios.post(`${getOllamaBase()}/api/chat`, {
       model: modelName,
-      stream: true,
+      stream: false,
       keep_alive: -1,
-      options: { temperature: 0.05 },
+      options: { temperature: 0.2, num_predict: 2048 },
       messages: [{ role: 'user', content: prompt, images: [base64] }]
-    }, { timeout: 300000, responseType: 'text' });
-    raw = resp.data;
+    }, { timeout: 300000 });
   } catch (err) {
-    const d = err?.response?.data ?? '';
-    if (typeof d === 'string' && d.includes('"done"')) raw = d;
-    else throw new Error(`${modelName}: ${err.message}`);
+    throw new Error(`${modelName}: ${err.message}`);
   }
 
-  const content = parseNDJSON(raw).replace(/```json\n?|\n?```/g, '').trim();
+  const rawContent = resp.data?.message?.content || '';
+  console.log(`[callModel] ${modelName}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
+
+  const content = rawContent.replace(/```json\n?|\n?```/g, '').trim();
   try {
     const arrMatch = content.match(/\[[\s\S]*\]/);
     if (arrMatch) {

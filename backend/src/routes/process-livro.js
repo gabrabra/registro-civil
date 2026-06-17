@@ -18,19 +18,6 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 }
 });
 
-function parseNDJSON(raw) {
-  let text = '';
-  if (typeof raw === 'string') {
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      try { text += JSON.parse(line)?.message?.content ?? ''; } catch (_) {}
-    }
-  } else if (raw?.message?.content) {
-    text = raw.message.content;
-  }
-  return text;
-}
-
 const COVER_PROMPT =
   'Você é especialista em leitura de capas de livros de cartório brasileiro.\n\n' +
   'Analise esta imagem de capa de livro de registro civil e extraia os dados visíveis.\n' +
@@ -49,23 +36,23 @@ const COVER_PROMPT =
   '}';
 
 async function callModelForCover(modelName, base64) {
-  let raw = '';
+  let resp;
   try {
-    const resp = await axios.post(`${getOllamaBase()}/api/chat`, {
+    resp = await axios.post(`${getOllamaBase()}/api/chat`, {
       model: modelName,
-      stream: true,
+      stream: false,
       keep_alive: -1,
-      options: { temperature: 0.05 },
+      options: { temperature: 0.1, num_predict: 512 },
       messages: [{ role: 'user', content: COVER_PROMPT, images: [base64] }]
-    }, { timeout: 180000, responseType: 'text' });
-    raw = resp.data;
+    }, { timeout: 180000 });
   } catch (err) {
-    const d = err?.response?.data ?? '';
-    if (typeof d === 'string' && d.includes('"done"')) raw = d;
-    else throw new Error(`${modelName}: ${err.message}`);
+    throw new Error(`${modelName}: ${err.message}`);
   }
 
-  const content = parseNDJSON(raw).replace(/```json\n?|\n?```/g, '').trim();
+  const rawContent = resp.data?.message?.content || '';
+  console.log(`[callModelForCover] ${modelName}: ${rawContent.length} chars — "${rawContent.slice(0, 150).replace(/\n/g, '\\n')}"`);
+
+  const content = rawContent.replace(/```json\n?|\n?```/g, '').trim();
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) throw new Error(`${modelName}: JSON não encontrado`);
   return JSON.parse(match[0]);
