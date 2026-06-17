@@ -36,34 +36,44 @@ const COVER_PROMPT =
   '}';
 
 async function callModelForCoverExternal(base64) {
-  const { url, key, model } = getExtConfig();
-  if (!url || !key || !model) throw new Error('API externa não configurada');
+  const { key, model, tipo, resolvedUrl } = getExtConfig();
+  if (!key || !model) throw new Error('API externa não configurada (preencha chave e modelo nas Configurações)');
+  if (!resolvedUrl) throw new Error('URL base não configurada');
 
-  let resp;
+  let rawContent;
   try {
-    resp = await axios.post(`${url.replace(/\/$/, '')}/chat/completions`, {
-      model,
-      max_tokens: 512,
-      messages: [{
-        role: 'user',
-        content: [
+    if (tipo === 'anthropic') {
+      const resp = await axios.post(`${resolvedUrl}/messages`, {
+        model, max_tokens: 512,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+          { type: 'text', text: COVER_PROMPT }
+        ]}]
+      }, {
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+        timeout: 60000
+      });
+      rawContent = resp.data?.content?.[0]?.text || '';
+    } else {
+      const resp = await axios.post(`${resolvedUrl.replace(/\/$/, '')}/chat/completions`, {
+        model, max_tokens: 512,
+        messages: [{ role: 'user', content: [
           { type: 'text', text: COVER_PROMPT },
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
-        ]
-      }]
-    }, {
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      timeout: 60000
-    });
+        ]}]
+      }, {
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        timeout: 60000
+      });
+      rawContent = resp.data?.choices?.[0]?.message?.content || '';
+    }
   } catch (err) {
     const detail = err.response?.data?.error?.message || err.response?.data?.error || JSON.stringify(err.response?.data) || err.message;
     console.error(`[callModelForCoverExt] ERRO ${err.response?.status}: ${detail}`);
     throw new Error(`API externa (${model}): ${detail}`);
   }
 
-  const rawContent = resp.data?.choices?.[0]?.message?.content || '';
   console.log(`[callModelForCoverExt] ${model}: ${rawContent.length} chars — "${rawContent.slice(0, 150).replace(/\n/g, '\\n')}"`);
-
   const content = rawContent.replace(/```json\n?|\n?```/g, '').trim();
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) throw new Error(`${model}: JSON não encontrado na resposta da capa`);

@@ -78,12 +78,27 @@ export default function Config() {
 
   // External API provider
   const [provider,    setProvider]    = useState('ollama');
+  const [extTipo,     setExtTipo]     = useState('generico');
   const [extUrl,      setExtUrl]      = useState('');
   const [extModel,    setExtModel]    = useState('');
   const [extKey,      setExtKey]      = useState('');
   const [extKeySet,   setExtKeySet]   = useState(false);
   const [savingExt,   setSavingExt]   = useState(false);
   const [saveExtMsg,  setSaveExtMsg]  = useState(null);
+
+  const MODELOS_POR_TIPO = {
+    openai:    ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+    anthropic: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
+    deepseek:  ['deepseek-chat', 'deepseek-reasoner', 'deepseek-vl2'],
+    generico:  [],
+  };
+  const TIPO_HINTS = {
+    openai:    { endpoint: 'https://api.openai.com/v1', link: 'https://platform.openai.com/api-keys', linkLabel: 'platform.openai.com' },
+    anthropic: { endpoint: 'https://api.anthropic.com/v1', link: 'https://console.anthropic.com', linkLabel: 'console.anthropic.com' },
+    deepseek:  { endpoint: 'https://api.deepseek.com/v1', link: 'https://platform.deepseek.com', linkLabel: 'platform.deepseek.com' },
+    generico:  null,
+  };
+  const modeloIsCustom = MODELOS_POR_TIPO[extTipo]?.length > 0 && !MODELOS_POR_TIPO[extTipo].includes(extModel);
 
   const handleValidate = useCallback(async () => {
     setValidating(true);
@@ -102,6 +117,7 @@ export default function Config() {
       setPodId(d.pod_id || '');
       setActiveModel(d.active_model || 'qwen2.5vl:7b');
       setProvider(d.provider || 'ollama');
+      setExtTipo(d.ext_tipo || 'generico');
       setExtUrl(d.ext_url || '');
       setExtModel(d.ext_model || '');
       setExtKeySet(d.ext_key_set || false);
@@ -164,7 +180,12 @@ export default function Config() {
     setSavingExt(true);
     setSaveExtMsg(null);
     try {
-      const payload = { ai_provider: 'openai', ai_external_url: extUrl.trim(), ai_external_model: extModel.trim() };
+      const payload = {
+        ai_provider:       'openai',
+        ai_external_tipo:  extTipo,
+        ai_external_url:   extUrl.trim(),
+        ai_external_model: extModel.trim(),
+      };
       if (extKey.trim()) payload.ai_external_key = extKey.trim();
       await configApi.saveProvider(payload);
       setSaveExtMsg({ ok: true, text: 'Configuração salva com sucesso.' });
@@ -243,38 +264,89 @@ export default function Config() {
 
         {provider === 'openai' && (
           <form onSubmit={handleSaveExtConfig} className="space-y-3 border-t border-slate-200 pt-4">
+
+            {/* Tipo do provedor */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">URL Base</label>
-              <input
-                type="text"
-                value={extUrl}
-                onChange={e => setExtUrl(e.target.value)}
-                placeholder="https://api.deepseek.com/v1"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono placeholder-slate-400
-                           focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white"
-              />
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Provedor</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { value: 'openai',    label: 'OpenAI' },
+                  { value: 'anthropic', label: 'Anthropic' },
+                  { value: 'deepseek',  label: 'DeepSeek' },
+                  { value: 'generico',  label: 'Genérico (OpenAI-compatível)' },
+                ].map(opt => (
+                  <label key={opt.value}
+                    className={`flex items-center gap-2 px-3 py-2 border rounded-lg cursor-pointer text-sm transition-colors ${
+                      extTipo === opt.value ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <input type="radio" name="extTipo" value={opt.value} checked={extTipo === opt.value}
+                      onChange={() => { setExtTipo(opt.value); setExtModel(MODELOS_POR_TIPO[opt.value]?.[0] || ''); }}
+                      className="accent-blue-600" />
+                    {opt.label}
+                  </label>
+                ))}
+              </div>
             </div>
+
+            {/* Hint para provedores conhecidos */}
+            {TIPO_HINTS[extTipo] && (
+              <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 space-y-0.5">
+                <p>Endpoint: <code className="bg-white border border-slate-200 px-1 rounded font-mono">{TIPO_HINTS[extTipo].endpoint}</code></p>
+                <p>Gere sua chave em <a href={TIPO_HINTS[extTipo].link} target="_blank" rel="noopener noreferrer"
+                  className="underline text-blue-600 hover:text-blue-800">{TIPO_HINTS[extTipo].linkLabel}</a></p>
+              </div>
+            )}
+
+            {/* URL base — só para Genérico */}
+            {extTipo === 'generico' && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">URL Base</label>
+                <input type="text" value={extUrl} onChange={e => setExtUrl(e.target.value)}
+                  placeholder="https://api.meu-provedor.com/v1"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono placeholder-slate-400
+                             focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white" />
+              </div>
+            )}
+
+            {/* Modelo */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Modelo</label>
-              <input
-                type="text"
-                value={extModel}
-                onChange={e => setExtModel(e.target.value)}
-                placeholder="deepseek-vl2  ou  gpt-4o-mini"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono placeholder-slate-400
-                           focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white"
-              />
+              {MODELOS_POR_TIPO[extTipo]?.length > 0 ? (
+                <>
+                  <select
+                    value={modeloIsCustom ? '__custom__' : extModel}
+                    onChange={e => {
+                      if (e.target.value === '__custom__') setExtModel('');
+                      else setExtModel(e.target.value);
+                    }}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+                  >
+                    {MODELOS_POR_TIPO[extTipo].map(m => <option key={m} value={m}>{m}</option>)}
+                    <option value="__custom__">Personalizado...</option>
+                  </select>
+                  {modeloIsCustom && (
+                    <input autoFocus type="text" value={extModel} onChange={e => setExtModel(e.target.value)}
+                      placeholder="nome-do-modelo"
+                      className="mt-1.5 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono placeholder-slate-400
+                                 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
+                  )}
+                </>
+              ) : (
+                <input type="text" value={extModel} onChange={e => setExtModel(e.target.value)}
+                  placeholder="nome-do-modelo"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono placeholder-slate-400
+                             focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white" />
+              )}
             </div>
+
+            {/* Chave API */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Chave API</label>
-              <input
-                type="password"
-                value={extKey}
-                onChange={e => setExtKey(e.target.value)}
+              <input type="password" value={extKey} onChange={e => setExtKey(e.target.value)}
                 placeholder={extKeySet ? '(chave já salva — deixe em branco para manter)' : 'sk-…'}
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono placeholder-slate-400
-                           focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white"
-              />
+                           focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white" />
               {extKeySet && !extKey && (
                 <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3" />Chave configurada
@@ -291,9 +363,8 @@ export default function Config() {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={savingExt || !extUrl.trim() || !extModel.trim()}
+            <button type="submit"
+              disabled={savingExt || !extModel.trim() || (extTipo === 'generico' && !extUrl.trim())}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50
                          rounded-lg text-sm font-medium text-white transition-colors"
             >

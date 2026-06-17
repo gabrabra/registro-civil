@@ -181,13 +181,61 @@ function applyBookConstraints(registros, livro) {
   });
 }
 
-async function callModelExternal(base64, prompt) {
-  const { url, key, model } = getExtConfig();
-  if (!url || !key || !model) throw new Error('API externa não configurada (preencha URL, chave e modelo nas Configurações)');
+function parseJsonFromText(text) {
+  const content = text.replace(/```json\n?|\n?```/g, '').trim();
+  try {
+    const arrMatch = content.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      const parsed = JSON.parse(arrMatch[0]);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    }
+    const objMatch = content.match(/\{[\s\S]*\}/);
+    if (objMatch) return [JSON.parse(objMatch[0])];
+  } catch (_) {}
+  return [];
+}
+
+async function callModelAnthropic(base64, prompt) {
+  const { key, model, resolvedUrl } = getExtConfig();
+  if (!key || !model) throw new Error('API Anthropic não configurada (preencha chave e modelo nas Configurações)');
 
   let resp;
   try {
-    resp = await axios.post(`${url.replace(/\/$/, '')}/chat/completions`, {
+    resp = await axios.post(`${resolvedUrl}/messages`, {
+      model,
+      max_tokens: 2048,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+          { type: 'text', text: prompt }
+        ]
+      }]
+    }, {
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      timeout: 120000
+    });
+  } catch (err) {
+    const detail = err.response?.data?.error?.message || err.response?.data?.error || JSON.stringify(err.response?.data) || err.message;
+    console.error(`[callModelAnthropic] ERRO ${err.response?.status}: ${detail}`);
+    throw new Error(`API Anthropic (${model}): ${detail}`);
+  }
+
+  const rawContent = resp.data?.content?.[0]?.text || '';
+  console.log(`[callModelAnthropic] ${model}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
+  return parseJsonFromText(rawContent);
+}
+
+async function callModelExternal(base64, prompt) {
+  const { key, model, tipo, resolvedUrl } = getExtConfig();
+  if (!key || !model) throw new Error('API externa não configurada (preencha chave e modelo nas Configurações)');
+  if (!resolvedUrl) throw new Error('URL base não configurada (preencha nas Configurações)');
+
+  if (tipo === 'anthropic') return callModelAnthropic(base64, prompt);
+
+  let resp;
+  try {
+    resp = await axios.post(`${resolvedUrl.replace(/\/$/, '')}/chat/completions`, {
       model,
       max_tokens: 2048,
       messages: [{
@@ -209,18 +257,7 @@ async function callModelExternal(base64, prompt) {
 
   const rawContent = resp.data?.choices?.[0]?.message?.content || '';
   console.log(`[callModelExt] ${model}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
-
-  const content = rawContent.replace(/```json\n?|\n?```/g, '').trim();
-  try {
-    const arrMatch = content.match(/\[[\s\S]*\]/);
-    if (arrMatch) {
-      const parsed = JSON.parse(arrMatch[0]);
-      return Array.isArray(parsed) ? parsed : [parsed];
-    }
-    const objMatch = content.match(/\{[\s\S]*\}/);
-    if (objMatch) return [JSON.parse(objMatch[0])];
-  } catch (_) {}
-  return [];
+  return parseJsonFromText(rawContent);
 }
 
 async function callModel(modelName, base64, prompt) {
@@ -239,18 +276,7 @@ async function callModel(modelName, base64, prompt) {
 
   const rawContent = resp.data?.message?.content || '';
   console.log(`[callModel] ${modelName}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
-
-  const content = rawContent.replace(/```json\n?|\n?```/g, '').trim();
-  try {
-    const arrMatch = content.match(/\[[\s\S]*\]/);
-    if (arrMatch) {
-      const parsed = JSON.parse(arrMatch[0]);
-      return Array.isArray(parsed) ? parsed : [parsed];
-    }
-    const objMatch = content.match(/\{[\s\S]*\}/);
-    if (objMatch) return [JSON.parse(objMatch[0])];
-  } catch (_) {}
-  return [];
+  return parseJsonFromText(rawContent);
 }
 
 router.post('/', upload.single('file'), async (req, res) => {

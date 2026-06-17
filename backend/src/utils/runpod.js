@@ -6,11 +6,18 @@ let _podId        = process.env.RUNPOD_POD_ID || 'k0vwks9huazlyg';
 let _ollamaBase   = process.env.RUNPOD_OLLAMA_URL || `https://${_podId}-11434.proxy.runpod.net`;
 let _activeModel  = 'qwen2.5vl:7b';
 
-// External API provider (OpenAI-compatible)
+// External API provider
 let _provider  = 'ollama';   // 'ollama' | 'openai'
 let _extUrl    = '';
 let _extKey    = '';
 let _extModel  = '';
+let _extTipo   = 'generico'; // 'openai' | 'anthropic' | 'deepseek' | 'generico'
+
+const PROVIDER_BASE_URLS = {
+  openai:    'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com/v1',
+  deepseek:  'https://api.deepseek.com/v1',
+};
 
 console.log(`[runpod] POD_ID="${_podId}" OLLAMA_BASE="${_ollamaBase}" API_KEY=${API_KEY ? 'SET' : 'NOT SET'}`);
 
@@ -27,17 +34,21 @@ let modelCache = { models: null, ts: 0 };
 function getPodId()       { return _podId; }
 function getOllamaBase()  { return _ollamaBase; }
 function getActiveModel() { return _activeModel; }
-function getProvider()    { return _provider; }
-function getExtConfig()   { return { url: _extUrl, key: _extKey, model: _extModel }; }
+function getProvider()  { return _provider; }
+function getExtConfig() {
+  const resolvedUrl = PROVIDER_BASE_URLS[_extTipo] || _extUrl;
+  return { url: _extUrl, key: _extKey, model: _extModel, tipo: _extTipo, resolvedUrl };
+}
 
 function setProvider(p) {
   _provider = p || 'ollama';
   console.log(`[runpod] Provider → "${_provider}"`);
 }
-function setExtConfig({ url, key, model } = {}) {
+function setExtConfig({ url, key, model, tipo } = {}) {
   if (url   !== undefined) _extUrl   = url   || '';
   if (key   !== undefined) _extKey   = key   || '';
   if (model !== undefined) _extModel = model || '';
+  if (tipo  !== undefined) _extTipo  = tipo  || 'generico';
 }
 
 function setPodId(newId) {
@@ -57,15 +68,16 @@ function setActiveModel(modelName) {
 async function loadConfigFromDb(pool) {
   try {
     const r = await pool.query(
-      "SELECT chave, valor FROM configuracoes WHERE chave IN ('runpod_pod_id','ai_model','ai_provider','ai_external_url','ai_external_key','ai_external_model')"
+      "SELECT chave, valor FROM configuracoes WHERE chave IN ('runpod_pod_id','ai_model','ai_provider','ai_external_url','ai_external_key','ai_external_model','ai_external_tipo')"
     );
     for (const row of r.rows) {
       if (row.chave === 'runpod_pod_id'    && row.valor) { setPodId(row.valor);      console.log(`[runpod] Pod ID carregado do banco: ${_podId}`); }
       if (row.chave === 'ai_model'         && row.valor) { setActiveModel(row.valor); console.log(`[runpod] Modelo ativo carregado do banco: ${_activeModel}`); }
       if (row.chave === 'ai_provider'      && row.valor) { setProvider(row.valor); }
-      if (row.chave === 'ai_external_url'  && row.valor) { _extUrl   = row.valor; }
-      if (row.chave === 'ai_external_key'  && row.valor) { _extKey   = row.valor; }
-      if (row.chave === 'ai_external_model'&& row.valor) { _extModel = row.valor; }
+      if (row.chave === 'ai_external_url'   && row.valor) { _extUrl   = row.valor; }
+      if (row.chave === 'ai_external_key'   && row.valor) { _extKey   = row.valor; }
+      if (row.chave === 'ai_external_model' && row.valor) { _extModel = row.valor; }
+      if (row.chave === 'ai_external_tipo'  && row.valor) { _extTipo  = row.valor; }
     }
   } catch (e) {
     console.warn('[runpod] Não foi possível carregar config do banco:', e.message);

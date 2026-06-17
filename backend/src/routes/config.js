@@ -33,6 +33,7 @@ router.get('/', (_req, res) => {
     provider:     getProvider(),
     ext_url:      ext.url,
     ext_model:    ext.model,
+    ext_tipo:     ext.tipo,
     ext_key_set:  Boolean(ext.key),
   });
 });
@@ -45,9 +46,11 @@ router.put('/', async (req, res) => {
   const newExtUrl   = req.body.ai_external_url;
   const newExtKey   = req.body.ai_external_key;
   const newExtModel = req.body.ai_external_model;
+  const newExtTipo  = req.body.ai_external_tipo;
 
   const hasChange = newId || newModel || newProvider
-    || newExtUrl !== undefined || newExtKey !== undefined || newExtModel !== undefined;
+    || newExtUrl !== undefined || newExtKey !== undefined
+    || newExtModel !== undefined || newExtTipo !== undefined;
   if (!hasChange) return res.status(400).json({ error: 'Nenhum campo para alterar' });
 
   async function upsert(chave, valor) {
@@ -65,14 +68,15 @@ router.put('/', async (req, res) => {
     if (newProvider)                { await upsert('ai_provider', newProvider); setProvider(newProvider); }
     if (newExtUrl   !== undefined)  { await upsert('ai_external_url',   newExtUrl   || ''); setExtConfig({ url:   newExtUrl }); }
     if (newExtKey   !== undefined && newExtKey !== '') {
-                                      await upsert('ai_external_key',   newExtKey);          setExtConfig({ key:   newExtKey }); }
-    if (newExtModel !== undefined)  { await upsert('ai_external_model', newExtModel || ''); setExtConfig({ model: newExtModel }); }
+                                      await upsert('ai_external_key',   newExtKey);               setExtConfig({ key:   newExtKey }); }
+    if (newExtModel !== undefined)  { await upsert('ai_external_model', newExtModel || '');        setExtConfig({ model: newExtModel }); }
+    if (newExtTipo  !== undefined)  { await upsert('ai_external_tipo',  newExtTipo  || 'generico'); setExtConfig({ tipo:  newExtTipo }); }
 
     const ext = getExtConfig();
     res.json({
       ok: true,
       pod_id: getPodId(), ollama_url: getOllamaBase(), active_model: getActiveModel(),
-      provider: getProvider(), ext_url: ext.url, ext_model: ext.model, ext_key_set: Boolean(ext.key),
+      provider: getProvider(), ext_url: ext.url, ext_model: ext.model, ext_tipo: ext.tipo, ext_key_set: Boolean(ext.key),
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -125,19 +129,30 @@ router.get('/validate', async (_req, res) => {
 
   if (provider === 'openai') {
     // Validate external API: call /models endpoint (cheap, no inference cost)
-    const { url, key, model } = getExtConfig();
-    result.ollama_url    = url || '';
+    const { url, key, model, tipo, resolvedUrl } = getExtConfig();
+    result.ollama_url      = resolvedUrl || url || '';
     result.models_required = model ? [model] : [];
-    result.pod_status    = 'N/A';
+    result.pod_status      = 'N/A';
 
-    if (!url || !key || !model) {
-      result.ollama_error = 'Configuração incompleta — preencha URL, chave e modelo nas configurações.';
+    const needsUrl = tipo === 'generico';
+    if ((needsUrl && !url) || !key || !model) {
+      result.ollama_error = tipo === 'generico'
+        ? 'Configuração incompleta — preencha URL base, chave e modelo.'
+        : 'Configuração incompleta — preencha chave e modelo.';
     } else {
       try {
-        await axios.get(`${url.replace(/\/$/, '')}/models`, {
-          headers: { Authorization: `Bearer ${key}` },
-          timeout: 10000
-        });
+        const testUrl = (resolvedUrl || url).replace(/\/$/, '');
+        if (tipo === 'anthropic') {
+          await axios.get(`${testUrl}/models`, {
+            headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+            timeout: 10000
+          });
+        } else {
+          await axios.get(`${testUrl}/models`, {
+            headers: { Authorization: `Bearer ${key}` },
+            timeout: 10000
+          });
+        }
         result.ollama_ok        = true;
         result.models_installed = [model];
         result.models_missing   = [];
