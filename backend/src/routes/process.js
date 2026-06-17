@@ -107,8 +107,8 @@ const BASE_PROMPT =
 function buildPrompt(livro, recordCountHint) {
   if (!livro && !recordCountHint) return BASE_PROMPT;
 
-  const yearStart = livro.data_inicio ? new Date(livro.data_inicio).getFullYear() : null;
-  const yearEnd   = livro.data_fim    ? new Date(livro.data_fim).getFullYear()    : null;
+  const yearStart = livro?.data_inicio ? new Date(livro.data_inicio).getFullYear() : null;
+  const yearEnd   = livro?.data_fim    ? new Date(livro.data_fim).getFullYear()    : null;
   const yearRange = yearStart || yearEnd
     ? `${yearStart ?? '?'} a ${yearEnd ?? '?'}`
     : null;
