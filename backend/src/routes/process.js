@@ -251,8 +251,12 @@ async function callModelExternal(base64, prompt) {
     });
   } catch (err) {
     const detail = err.response?.data?.error?.message || err.response?.data?.error || JSON.stringify(err.response?.data) || err.message;
-    console.error(`[callModelExt] ERRO ${err.response?.status}: ${detail}`);
-    throw new Error(`API externa (${model}): ${detail}`);
+    const detailStr = typeof detail === 'string' ? detail : JSON.stringify(detail);
+    console.error(`[callModelExt] ERRO ${err.response?.status}: ${detailStr}`);
+    if (detailStr.includes('image_url') || detailStr.includes('image') && detailStr.includes('unknown variant')) {
+      throw new Error(`O modelo "${model}" não suporta imagens. Use um modelo com visão: deepseek-vl2 (DeepSeek), gpt-4o (OpenAI) ou claude-sonnet-4-6 (Anthropic).`);
+    }
+    throw new Error(`API externa (${model}): ${detailStr}`);
   }
 
   const rawContent = resp.data?.choices?.[0]?.message?.content || '';
