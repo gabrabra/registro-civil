@@ -27,6 +27,60 @@ const upload = multer({
   }
 });
 
+const TESTAMENTO_PROMPT =
+  'Você é especialista em leitura de documentos manuscritos históricos de cartório brasileiro.\n\n' +
+  'Analise esta imagem de registro de testamento (século XIX ou XX).\n' +
+  'O texto pode ser manuscrito cursivo antigo, desbotado ou parcialmente ilegível — faça seu melhor esforço.\n\n' +
+  'PASSO 1 — Leitura: Descreva brevemente o que você vê e transcreva nomes, datas e cláusulas que consegue ler.\n' +
+  'PASSO 2 — Extração: Com base no que leu, extraia os dados de cada testamento encontrado.\n\n' +
+  'Escreva o resultado como array JSON (um objeto por testamento encontrado):\n\n' +
+  '[\n' +
+  '  {\n' +
+  '    "testador": "nome completo do testador (quem fez o testamento) ou null",\n' +
+  '    "data_testamento": "data no formato YYYY-MM-DD ou descrição textual ou null",\n' +
+  '    "ano": ano como número inteiro ou null,\n' +
+  '    "livro": "número/código do livro ou null",\n' +
+  '    "folha": "número da folha ou null",\n' +
+  '    "tabeliao": "nome do tabelião ou null",\n' +
+  '    "testemunhas": "nomes das testemunhas separados por vírgula ou null",\n' +
+  '    "municipio": "nome do município ou null",\n' +
+  '    "estado": "sigla UF ex: PE ou null",\n' +
+  '    "confianca": "alta | media | baixa",\n' +
+  '    "observacoes": "dificuldades de leitura, informações sobre herdeiros, bens ou null"\n' +
+  '  }\n' +
+  ']\n\n' +
+  'Se não houver registros de testamento visíveis, retorne: []';
+
+const ESCRITURA_PROMPT =
+  'Você é especialista em leitura de documentos manuscritos históricos de cartório brasileiro.\n\n' +
+  'Analise esta imagem de escritura de compra e venda de imóvel (século XIX ou XX).\n' +
+  'O texto pode ser manuscrito cursivo antigo, desbotado ou parcialmente ilegível — faça seu melhor esforço.\n\n' +
+  'PASSO 1 — Leitura: Descreva brevemente o que você vê e transcreva nomes, valores, descrições de imóveis e datas que consegue ler.\n' +
+  'PASSO 2 — Extração: Com base no que leu, extraia os dados de cada escritura de compra e venda.\n\n' +
+  'Escreva o resultado como array JSON (um objeto por escritura encontrada):\n\n' +
+  '[\n' +
+  '  {\n' +
+  '    "vendedor": "nome completo do vendedor ou null",\n' +
+  '    "cpf_vendedor": "CPF se visível ou null",\n' +
+  '    "comprador": "nome completo do comprador ou null",\n' +
+  '    "cpf_comprador": "CPF se visível ou null",\n' +
+  '    "data_escritura": "data no formato YYYY-MM-DD ou descrição textual ou null",\n' +
+  '    "ano": ano como número inteiro ou null,\n' +
+  '    "livro": "número/código do livro ou null",\n' +
+  '    "folha": "número da folha ou null",\n' +
+  '    "descricao_imovel": "descrição do imóvel (tipo, metragem, características) ou null",\n' +
+  '    "endereco_imovel": "endereço completo do imóvel ou null",\n' +
+  '    "valor": "valor com moeda histórica (ex: 500 mil-réis, 1:200$000, R$ 50.000) ou null",\n' +
+  '    "tabeliao": "nome do tabelião ou null",\n' +
+  '    "cartorio": "nome do cartório ou null",\n' +
+  '    "municipio": "nome do município ou null",\n' +
+  '    "estado": "sigla UF ex: PE ou null",\n' +
+  '    "confianca": "alta | media | baixa",\n' +
+  '    "observacoes": "dificuldades de leitura ou informações adicionais ou null"\n' +
+  '  }\n' +
+  ']\n\n' +
+  'Se não houver escrituras de compra e venda visíveis, retorne: []';
+
 const BASE_PROMPT =
   'Você é especialista em leitura de documentos manuscritos históricos de cartório brasileiro.\n\n' +
   'Analise esta imagem de página de livro de registro civil de nascimento (século XIX ou XX).\n' +
@@ -205,12 +259,13 @@ router.post('/', upload.single('file'), async (req, res) => {
   const filePath    = req.file.path;
   const imageBuffer = fs.readFileSync(filePath);
   const livroId     = req.body.livro_id || null;
+  const tipo        = req.body.tipo || 'nascimento';
   const isImage     = /image\/(jpeg|png|webp|tiff)/.test(req.file.mimetype);
 
-  console.log(`[process] Nova requisição — arquivo=${req.file.originalname} livro_id=${livroId} isImage=${isImage}`);
+  console.log(`[process] Nova requisição — tipo=${tipo} arquivo=${req.file.originalname} livro_id=${livroId} isImage=${isImage}`);
 
   const provider = getProvider();
-  const livro    = await getLivro(livroId);
+  const livro    = tipo === 'nascimento' ? await getLivro(livroId) : null;
   const model    = getActiveModel();
 
   const arquivoInfo = {
@@ -224,7 +279,12 @@ router.post('/', upload.single('file'), async (req, res) => {
   let podError     = null;
 
   const base64 = imageBuffer.toString('base64');
-  const prompt  = buildPrompt(livro, null); // count hint added below if needed
+
+  // Select prompt based on document type
+  let prompt;
+  if (tipo === 'testamento') prompt = TESTAMENTO_PROMPT;
+  else if (tipo === 'escritura') prompt = ESCRITURA_PROMPT;
+  else prompt = buildPrompt(livro, null); // nascimento — count hint added below
 
   if (provider === 'openai') {
     console.log(`[process] API externa: ${getExtConfig().model}`);
@@ -244,16 +304,18 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     console.log(`[process] Modelo ativo: ${model}`);
 
-    // Detect number of records in page (images only)
-    const recordCount = isImage
-      ? await detectRecordCount(imageBuffer, model, getOllamaBase())
-      : 1;
-
-    const promptWithHint = buildPrompt(livro, recordCount > 1 ? recordCount : null);
-    console.log(`[process] Processando imagem completa (${recordCount} registro(s) detectados) → ${model}`);
+    // Record count detection only for nascimentos (multiple records per page)
+    let finalPrompt = prompt;
+    if (tipo === 'nascimento') {
+      const recordCount = isImage
+        ? await detectRecordCount(imageBuffer, model, getOllamaBase())
+        : 1;
+      finalPrompt = buildPrompt(livro, recordCount > 1 ? recordCount : null);
+      console.log(`[process] Processando imagem completa (${recordCount} registro(s) detectados) → ${model}`);
+    }
 
     try {
-      const records = await callModel(model, base64, promptWithHint);
+      const records = await callModel(model, base64, finalPrompt);
       console.log(`[process] ${model}: ${records.length} registro(s)`);
       allRegistros = records;
     } catch (e) {
@@ -262,7 +324,7 @@ router.post('/', upload.single('file'), async (req, res) => {
       if (model !== fallback) {
         console.log(`[process] Tentando modelo padrão como fallback: ${fallback}`);
         try {
-          const records = await callModel(fallback, base64, promptWithHint);
+          const records = await callModel(fallback, base64, finalPrompt);
           console.log(`[process] ${fallback} (fallback): ${records.length} registro(s)`);
           allRegistros = records;
           podError = `Modelo "${model}" indisponível — processado com "${fallback}"`;
@@ -276,7 +338,8 @@ router.post('/', upload.single('file'), async (req, res) => {
     }
   }
 
-  const registros = applyBookConstraints(allRegistros, livro);
+  // Apply book constraints only for nascimentos
+  const registros = tipo === 'nascimento' ? applyBookConstraints(allRegistros, livro) : allRegistros;
   console.log(`[process] Resultado final: ${registros.length} registro(s)`);
 
   const allFailed = registros.length === 0;

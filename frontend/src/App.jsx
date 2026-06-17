@@ -9,6 +9,10 @@ import LivrosForm from './pages/livros/Form.jsx';
 import NascimentosList from './pages/nascimentos/List.jsx';
 import NascimentosForm from './pages/nascimentos/Form.jsx';
 import BatchImport from './pages/nascimentos/BatchImport.jsx';
+import TestamentosList from './pages/testamentos/List.jsx';
+import TestamentosForm from './pages/testamentos/Form.jsx';
+import EscriturasList from './pages/escrituras/List.jsx';
+import EscriturasForm from './pages/escrituras/Form.jsx';
 import Placeholder from './pages/Placeholder.jsx';
 import Config from './pages/Config.jsx';
 
@@ -34,6 +38,12 @@ export default function App() {
               <Route path="nascimentos/lote"         element={<BatchImport />} />
               <Route path="obitos"        element={<Placeholder title="Óbitos" />} />
               <Route path="casamentos"   element={<Placeholder title="Casamentos" />} />
+              <Route path="testamentos"                element={<TestamentosList />} />
+              <Route path="testamentos/novo"           element={<TestamentosForm />} />
+              <Route path="testamentos/:id/editar"     element={<TestamentosForm />} />
+              <Route path="escrituras-compra-venda"              element={<EscriturasList />} />
+              <Route path="escrituras-compra-venda/novo"         element={<EscriturasForm />} />
+              <Route path="escrituras-compra-venda/:id/editar"   element={<EscriturasForm />} />
               <Route path="configuracoes" element={<Config />} />
             </Route>
           </Routes>

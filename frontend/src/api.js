@@ -42,15 +42,35 @@ export const nascimentosApi = {
   localizar: (id)     => http.post(`/nascimentos/${id}/localizar`).then(r => r.data),
 };
 
+export const testamentosApi = {
+  list:   (params) => http.get('/testamentos', { params }).then(r => r.data),
+  get:    (id)     => http.get(`/testamentos/${id}`).then(r => r.data),
+  create: (data)   => http.post('/testamentos', data).then(r => r.data),
+  update: (id, d)  => http.put(`/testamentos/${id}`, d).then(r => r.data),
+  remove: (id)     => http.delete(`/testamentos/${id}`).then(r => r.data),
+};
+
+export const escriturasApi = {
+  list:   (params) => http.get('/escrituras', { params }).then(r => r.data),
+  get:    (id)     => http.get(`/escrituras/${id}`).then(r => r.data),
+  create: (data)   => http.post('/escrituras', data).then(r => r.data),
+  update: (id, d)  => http.put(`/escrituras/${id}`, d).then(r => r.data),
+  remove: (id)     => http.delete(`/escrituras/${id}`).then(r => r.data),
+};
+
 export const processApi = {
-  file: (file, livroId, onProgress) => {
+  // tipoOrProgress: backward-compat — pass string tipo OR onProgress function
+  file: (file, livroId, tipoOrProgress, onProgress) => {
+    const tipo       = typeof tipoOrProgress === 'string' ? tipoOrProgress : null;
+    const progressFn = typeof tipoOrProgress === 'function' ? tipoOrProgress : onProgress;
     const form = new FormData();
     form.append('file', file);
     if (livroId) form.append('livro_id', livroId);
+    if (tipo) form.append('tipo', tipo);
     return http.post('/process', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 600000, // 10 min: pod wake-up (up to 5 min) + inference
-      onUploadProgress: onProgress
+      timeout: 600000,
+      onUploadProgress: progressFn
     }).then(r => r.data);
   }
 };

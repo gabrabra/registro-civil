@@ -67,6 +67,62 @@ async function initDb() {
   await pool.query(`ALTER TABLE registros_nascimento ADD COLUMN IF NOT EXISTS arquivo_url VARCHAR(500)`).catch(() => {});
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS registros_testamento (
+      id              SERIAL PRIMARY KEY,
+      livro_id        INTEGER REFERENCES livros(id) ON DELETE SET NULL,
+      testador        VARCHAR(500),
+      data_testamento VARCHAR(200),
+      ano             INTEGER,
+      livro           VARCHAR(100),
+      folha           VARCHAR(100),
+      tabeliao        VARCHAR(500),
+      testemunhas     TEXT,
+      municipio       VARCHAR(500),
+      estado          VARCHAR(20),
+      confianca       VARCHAR(20),
+      observacoes     TEXT,
+      arquivo_path    VARCHAR(1000),
+      arquivo_nome    VARCHAR(500),
+      arquivo_tipo    VARCHAR(100),
+      arquivo_url     VARCHAR(500),
+      campos_bbox     JSONB,
+      criado_em       TIMESTAMP DEFAULT NOW(),
+      atualizado_em   TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS registros_escritura (
+      id               SERIAL PRIMARY KEY,
+      livro_id         INTEGER REFERENCES livros(id) ON DELETE SET NULL,
+      vendedor         VARCHAR(500),
+      cpf_vendedor     VARCHAR(50),
+      comprador        VARCHAR(500),
+      cpf_comprador    VARCHAR(50),
+      data_escritura   VARCHAR(200),
+      ano              INTEGER,
+      livro            VARCHAR(100),
+      folha            VARCHAR(100),
+      descricao_imovel TEXT,
+      endereco_imovel  VARCHAR(1000),
+      valor            VARCHAR(100),
+      tabeliao         VARCHAR(500),
+      cartorio         VARCHAR(500),
+      municipio        VARCHAR(500),
+      estado           VARCHAR(20),
+      confianca        VARCHAR(20),
+      observacoes      TEXT,
+      arquivo_path     VARCHAR(1000),
+      arquivo_nome     VARCHAR(500),
+      arquivo_tipo     VARCHAR(100),
+      arquivo_url      VARCHAR(500),
+      campos_bbox      JSONB,
+      criado_em        TIMESTAMP DEFAULT NOW(),
+      atualizado_em    TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS configuracoes (
       chave        VARCHAR(100) PRIMARY KEY,
       valor        TEXT,

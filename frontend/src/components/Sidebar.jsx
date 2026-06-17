@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Users, BookHeart, Library, ChevronDown, ChevronRight, Power, Loader2, Settings } from 'lucide-react';
+import { Users, BookHeart, Library, ChevronDown, ChevronRight, Power, Loader2, Settings, Home } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { podApi } from '../api.js';
 
@@ -18,6 +18,14 @@ const sections = [
       { to: '/nascimentos', label: 'Nascimentos' },
       { to: '/obitos',      label: 'Óbitos' },
       { to: '/casamentos',  label: 'Casamentos' },
+      { to: '/testamentos', label: 'Testamentos' },
+    ]
+  },
+  {
+    label: 'Registro de Imóveis',
+    icon: Home,
+    items: [
+      { to: '/escrituras-compra-venda', label: 'Compra e Venda' },
     ]
   }
 ];
@@ -99,7 +107,7 @@ function PodWidget() {
 }
 
 export default function Sidebar() {
-  const [open, setOpen] = useState({ Acervo: true, 'Registro Civil': true });
+  const [open, setOpen] = useState({ Acervo: true, 'Registro Civil': true, 'Registro de Imóveis': true });
 
   return (
     <aside className="w-60 min-h-screen bg-sidebar flex flex-col">

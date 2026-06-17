@@ -7,6 +7,8 @@ const { loadConfigFromDb } = require('./utils/runpod');
 const authRouter         = require('./routes/auth');
 const livrosRouter       = require('./routes/livros');
 const nascimentosRouter  = require('./routes/nascimentos');
+const testamentosRouter  = require('./routes/testamentos');
+const escriturasRouter   = require('./routes/escrituras');
 const processRouter      = require('./routes/process');
 const processLivroRouter = require('./routes/process-livro');
 const configRouter       = require('./routes/config');
@@ -22,9 +24,11 @@ app.use('/files', express.static(UPLOADS_DIR));
 app.use('/api/auth', authRouter);
 
 // Rotas protegidas
-app.use('/api/livros',       auth, livrosRouter);
-app.use('/api/nascimentos',  auth, nascimentosRouter);
-app.use('/api/process',      auth, processRouter);
+app.use('/api/livros',               auth, livrosRouter);
+app.use('/api/nascimentos',          auth, nascimentosRouter);
+app.use('/api/testamentos',          auth, testamentosRouter);
+app.use('/api/escrituras',           auth, escriturasRouter);
+app.use('/api/process',              auth, processRouter);
 app.use('/api/process',      auth, processLivroRouter); // /livro-capa
 app.use('/api/config',       auth, configRouter);
 
