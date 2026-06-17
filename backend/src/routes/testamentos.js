@@ -72,8 +72,8 @@ router.post('/', async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO registros_testamento
         (livro_id, testador, data_testamento, ano, livro, folha, tabeliao, testemunhas,
-         municipio, estado, confianca, observacoes, arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         municipio, estado, confianca, observacoes, arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox, arquivos_urls)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
@@ -84,6 +84,7 @@ router.post('/', async (req, res) => {
         f.arquivo_path, f.arquivo_nome, f.arquivo_tipo,
         arquivoUrl,
         f.campos_bbox ? JSON.stringify(f.campos_bbox) : null,
+        f.arquivos_urls ? JSON.stringify(f.arquivos_urls) : null,
       ]
     );
     res.status(201).json(addArquivoUrl(rows[0]));

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Upload, Sparkles, AlertTriangle, CheckCircle, ChevronLeft, Save, Loader2, FileText, X, BookOpen } from 'lucide-react';
+import { Upload, Sparkles, AlertTriangle, CheckCircle, ChevronLeft, Save, Loader2, FileText, X, BookOpen, Plus } from 'lucide-react';
 import { escriturasApi, processApi, livrosApi } from '../../api.js';
 
 const EMPTY = {
@@ -35,43 +35,71 @@ function Field({ label, name, value, onChange, confidence, error, textarea, requ
   );
 }
 
-function DropZone({ file, onFile, onClear, uploading }) {
+function MultiDropZone({ files, onAddFiles, onRemove, uploading }) {
   const [drag, setDrag] = useState(false);
   const inputRef = useRef();
-  function handle(f) {
-    if (!f) return;
-    if (!/image\/(jpeg|png|webp|tiff)|application\/pdf/.test(f.type)) return alert('Formato não suportado.');
-    onFile(f);
-  }
-  const preview = file && !file.type.includes('pdf') ? URL.createObjectURL(file) : null;
 
-  if (file) return (
-    <div className="border-2 border-blue-300 bg-blue-50 rounded-xl p-4 flex items-center gap-4">
-      {preview
-        ? <img src={preview} alt="preview" className="h-20 w-20 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
-        : <div className="h-20 w-20 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0"><FileText className="w-8 h-8 text-slate-400" /></div>
-      }
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-800 truncate">{file.name}</p>
-        <p className="text-xs text-slate-500 mt-0.5">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-      </div>
-      {!uploading && <button onClick={onClear} className="text-slate-400 hover:text-red-500 transition-colors flex-shrink-0"><X className="w-5 h-5" /></button>}
-    </div>
-  );
+  function handle(fileList) {
+    const valid = Array.from(fileList).filter(f =>
+      /image\/(jpeg|png|webp|tiff)|application\/pdf/.test(f.type)
+    );
+    if (!valid.length) { alert('Formato não suportado. Use JPG, PNG, TIFF, WEBP ou PDF.'); return; }
+    onAddFiles(valid);
+  }
 
   return (
-    <div
-      onDragOver={e => { e.preventDefault(); setDrag(true); }}
-      onDragLeave={() => setDrag(false)}
-      onDrop={e => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files[0]); }}
-      onClick={() => inputRef.current?.click()}
-      className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${drag ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50'}`}
-    >
-      <input ref={inputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={e => handle(e.target.files[0])} />
-      <Upload className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-      <p className="text-sm font-medium text-slate-600">Arraste o documento aqui</p>
-      <p className="text-xs text-slate-400 mt-1">ou clique para selecionar</p>
-      <p className="text-xs text-slate-300 mt-2">JPG, PNG, TIFF, WEBP ou PDF — até 50 MB</p>
+    <div className="space-y-2">
+      {files.map((f, i) => {
+        const preview = !f.type.includes('pdf') ? URL.createObjectURL(f) : null;
+        return (
+          <div key={i} className="border border-blue-200 bg-blue-50 rounded-xl p-3 flex items-center gap-3">
+            <span className="text-xs font-semibold text-slate-400 w-5 text-center flex-shrink-0">p{i + 1}</span>
+            {preview
+              ? <img src={preview} alt={`pg ${i + 1}`} className="h-14 w-14 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+              : <div className="h-14 w-14 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0"><FileText className="w-6 h-6 text-slate-400" /></div>
+            }
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-slate-800 truncate">{f.name}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{(f.size / 1024 / 1024).toFixed(2)} MB</p>
+            </div>
+            {!uploading && (
+              <button type="button" onClick={() => onRemove(i)} className="text-slate-400 hover:text-red-500 transition-colors flex-shrink-0">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      <div
+        onDragOver={e => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={e => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files); }}
+        onClick={() => !uploading && inputRef.current?.click()}
+        className={`border-2 border-dashed rounded-xl text-center transition-colors ${uploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${drag ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50'} ${files.length ? 'p-4' : 'p-8'}`}
+      >
+        <input ref={inputRef} type="file" accept="image/*,.pdf" multiple className="hidden" onChange={e => handle(e.target.files)} />
+        {files.length === 0 ? (
+          <>
+            <Upload className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+            <p className="text-sm font-medium text-slate-600">Arraste as páginas do documento aqui</p>
+            <p className="text-xs text-slate-400 mt-1">ou clique para selecionar (pode selecionar múltiplos arquivos)</p>
+            <p className="text-xs text-slate-300 mt-2">JPG, PNG, TIFF, WEBP ou PDF — até 50 MB por arquivo</p>
+          </>
+        ) : (
+          <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+            <Plus className="w-4 h-4" />
+            Adicionar mais páginas
+          </div>
+        )}
+      </div>
+
+      {files.length > 1 && (
+        <p className="text-xs text-blue-600 flex items-center gap-1.5">
+          <CheckCircle className="w-3 h-3" />
+          {files.length} páginas selecionadas — a IA analisará todas como um único documento
+        </p>
+      )}
     </div>
   );
 }
@@ -85,8 +113,8 @@ export default function EscriturasForm() {
   const [form,       setForm]       = useState({ ...EMPTY, livro_id: searchParams.get('livro_id') || '' });
   const [livros,     setLivros]     = useState([]);
   const [confidence, setConfidence] = useState({});
-  const [file,       setFile]       = useState(null);
-  const [fileUrl,    setFileUrl]    = useState(null);
+  const [files,      setFiles]      = useState([]);
+  const [fileUrls,   setFileUrls]   = useState([]);
   const [processing, setProcessing] = useState(false);
   const [saving,     setSaving]     = useState(false);
   const [errors,     setErrors]     = useState({});
@@ -117,7 +145,8 @@ export default function EscriturasForm() {
         estado:          r.estado          || '',
         observacoes:     r.observacoes     || '',
       });
-      if (r.arquivo_url) setFileUrl(r.arquivo_url);
+      const urls = r.arquivos_urls || (r.arquivo_url ? [r.arquivo_url] : []);
+      setFileUrls(urls);
     }).catch(() => setToast({ msg: 'Erro ao carregar registro', type: 'error' }));
   }, [id]);
 
@@ -127,12 +156,23 @@ export default function EscriturasForm() {
     setErrors(er => ({ ...er, [name]: '' }));
   }
 
+  function addFiles(newFiles) {
+    setFiles(prev => [...prev, ...newFiles]);
+    setAiDone(false);
+    setConfidence({});
+  }
+
+  function removeFile(index) {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+    setAiDone(false);
+  }
+
   async function handleProcess() {
-    if (!file) return;
+    if (!files.length) return;
     setProcessing(true);
     setAiDone(false);
     try {
-      const data = await processApi.file(file, form.livro_id || null, 'escritura');
+      const data = await processApi.file(files, form.livro_id || null, 'escritura');
       const reg  = data.registros?.[0] || {};
       const conf = reg.confianca || 'baixa';
       const perField = {};
@@ -156,17 +196,18 @@ export default function EscriturasForm() {
         municipio:       reg.municipio       || '',
         estado:          reg.estado          || '',
         observacoes:     reg.observacoes     || '',
-        _arquivo_path: data.arquivo_path,
-        _arquivo_nome: data.arquivo_nome,
-        _arquivo_tipo: data.arquivo_tipo,
-        _arquivo_url:  data.arquivo_url,
+        _arquivo_path:  data.arquivo_path,
+        _arquivo_nome:  data.arquivo_nome,
+        _arquivo_tipo:  data.arquivo_tipo,
+        _arquivo_url:   data.arquivo_url,
+        _arquivos_urls: data.arquivos_urls,
       }));
       setConfidence(perField);
-      setFileUrl(data.arquivo_url || null);
+      setFileUrls(data.arquivos_urls || (data.arquivo_url ? [data.arquivo_url] : []));
       setAiDone(true);
       setToast(data.ai_error
         ? { msg: `IA indisponível: ${data.ai_error_detail || 'Modelos falharam'} — preencha manualmente`, type: 'error' }
-        : { msg: 'Dados extraídos! Revise e salve.', type: 'success' }
+        : { msg: `Dados extraídos de ${files.length} página(s)! Revise e salve.`, type: 'success' }
       );
     } catch (e) {
       setToast({ msg: `Erro ao processar: ${e.message}`, type: 'error' });
@@ -190,12 +231,14 @@ export default function EscriturasForm() {
     try {
       const payload = {
         ...form,
-        arquivo_path: form._arquivo_path || null,
-        arquivo_nome: form._arquivo_nome || null,
-        arquivo_tipo: form._arquivo_tipo || null,
+        arquivo_path:  form._arquivo_path  || null,
+        arquivo_nome:  form._arquivo_nome  || null,
+        arquivo_tipo:  form._arquivo_tipo  || null,
+        arquivos_urls: form._arquivos_urls || null,
       };
       delete payload._arquivo_path; delete payload._arquivo_nome;
       delete payload._arquivo_tipo; delete payload._arquivo_url;
+      delete payload._arquivos_urls;
       if (isEdit) await escriturasApi.update(id, payload);
       else        await escriturasApi.create(payload);
       const livroId = searchParams.get('livro_id');
@@ -255,21 +298,21 @@ export default function EscriturasForm() {
         {/* Upload */}
         {!isEdit && (
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-700 mb-3">Documento da Escritura</h2>
-            <DropZone file={file} onFile={setFile} onClear={() => { setFile(null); setAiDone(false); setConfidence({}); }} uploading={processing} />
-            {file && !processing && (
+            <h2 className="text-sm font-semibold text-slate-700 mb-3">Páginas do Documento</h2>
+            <MultiDropZone files={files} onAddFiles={addFiles} onRemove={removeFile} uploading={processing} />
+            {files.length > 0 && !processing && (
               <button type="button" onClick={handleProcess}
                 className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors">
                 <Sparkles className="w-4 h-4" />
-                Transcrever com IA
+                Transcrever com IA{files.length > 1 ? ` (${files.length} páginas)` : ''}
               </button>
             )}
             {processing && (
               <div className="mt-3 flex items-center gap-3 py-3 px-4 bg-violet-50 rounded-lg border border-violet-200">
                 <Loader2 className="w-5 h-5 text-violet-600 animate-spin flex-shrink-0" />
                 <div>
-                  <p className="text-sm font-medium text-violet-800">IA processando... (pode levar 40–90 s)</p>
-                  <p className="text-xs text-violet-600 mt-0.5">Aguarde — IA analisando o documento</p>
+                  <p className="text-sm font-medium text-violet-800">IA processando {files.length} página(s)... (pode levar 40–90 s)</p>
+                  <p className="text-xs text-violet-600 mt-0.5">Aguarde — IA analisando o documento completo</p>
                 </div>
               </div>
             )}
@@ -282,12 +325,18 @@ export default function EscriturasForm() {
           </div>
         )}
 
-        {isEdit && fileUrl && (
+        {isEdit && fileUrls.length > 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <p className="text-xs font-medium text-slate-500 mb-2">Documento anexado</p>
-            <a href={fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm">
-              <FileText className="w-4 h-4" /> Abrir documento
-            </a>
+            <p className="text-xs font-medium text-slate-500 mb-2">
+              {fileUrls.length > 1 ? `${fileUrls.length} páginas anexadas` : 'Documento anexado'}
+            </p>
+            <div className="space-y-1">
+              {fileUrls.map((url, i) => (
+                <a key={i} href={url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm">
+                  <FileText className="w-4 h-4" /> {fileUrls.length > 1 ? `Página ${i + 1}` : 'Abrir documento'}
+                </a>
+              ))}
+            </div>
           </div>
         )}
 

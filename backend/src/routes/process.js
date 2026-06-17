@@ -25,7 +25,7 @@ const upload = multer({
     const ok = /image\/(jpeg|png|webp|tiff)|application\/pdf/.test(file.mimetype);
     cb(null, ok);
   }
-});
+}).any(); // accepts both 'file' (legacy) and 'files' (multi-page)
 
 const TESTAMENTO_PROMPT =
   'Você é especialista em leitura de documentos manuscritos históricos de cartório brasileiro.\n\n' +
@@ -195,9 +195,14 @@ function parseJsonFromText(text) {
   return [];
 }
 
-async function callModelAnthropic(base64, prompt) {
+async function callModelAnthropic(base64s, prompt) {
   const { key, model, resolvedUrl } = getExtConfig();
   if (!key || !model) throw new Error('API Anthropic não configurada (preencha chave e modelo nas Configurações)');
+
+  const imageBlocks = base64s.map(b => ({
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/jpeg', data: b }
+  }));
 
   let resp;
   try {
@@ -206,10 +211,7 @@ async function callModelAnthropic(base64, prompt) {
       max_tokens: 2048,
       messages: [{
         role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
-          { type: 'text', text: prompt }
-        ]
+        content: [...imageBlocks, { type: 'text', text: prompt }]
       }]
     }, {
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
@@ -226,12 +228,17 @@ async function callModelAnthropic(base64, prompt) {
   return parseJsonFromText(rawContent);
 }
 
-async function callModelExternal(base64, prompt) {
+async function callModelExternal(base64s, prompt) {
   const { key, model, tipo, resolvedUrl } = getExtConfig();
   if (!key || !model) throw new Error('API externa não configurada (preencha chave e modelo nas Configurações)');
   if (!resolvedUrl) throw new Error('URL base não configurada (preencha nas Configurações)');
 
-  if (tipo === 'anthropic') return callModelAnthropic(base64, prompt);
+  if (tipo === 'anthropic') return callModelAnthropic(base64s, prompt);
+
+  const imageBlocks = base64s.map(b => ({
+    type: 'image_url',
+    image_url: { url: `data:image/jpeg;base64,${b}` }
+  }));
 
   let resp;
   try {
@@ -240,10 +247,7 @@ async function callModelExternal(base64, prompt) {
       max_tokens: 2048,
       messages: [{
         role: 'user',
-        content: [
-          { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
-        ]
+        content: [{ type: 'text', text: prompt }, ...imageBlocks]
       }]
     }, {
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -264,7 +268,7 @@ async function callModelExternal(base64, prompt) {
   return parseJsonFromText(rawContent);
 }
 
-async function callModel(modelName, base64, prompt) {
+async function callModel(modelName, base64s, prompt) {
   let resp;
   try {
     resp = await axios.post(`${getOllamaBase()}/api/chat`, {
@@ -272,7 +276,7 @@ async function callModel(modelName, base64, prompt) {
       stream: false,
       keep_alive: -1,
       options: { temperature: 0.2, num_predict: 2048 },
-      messages: [{ role: 'user', content: prompt, images: [base64] }]
+      messages: [{ role: 'user', content: prompt, images: base64s }]
     }, { timeout: 300000 });
   } catch (err) {
     throw new Error(`${modelName}: ${err.message}`);
@@ -283,16 +287,16 @@ async function callModel(modelName, base64, prompt) {
   return parseJsonFromText(rawContent);
 }
 
-router.post('/', upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+router.post('/', upload, async (req, res) => {
+  const uploadedFiles = req.files || [];
+  if (!uploadedFiles.length) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
-  const filePath    = req.file.path;
-  const imageBuffer = fs.readFileSync(filePath);
+  const primaryFile = uploadedFiles[0];
   const livroId     = req.body.livro_id || null;
   const tipo        = req.body.tipo || 'nascimento';
-  const isImage     = /image\/(jpeg|png|webp|tiff)/.test(req.file.mimetype);
+  const isImage     = /image\/(jpeg|png|webp|tiff)/.test(primaryFile.mimetype);
 
-  console.log(`[process] Nova requisição — tipo=${tipo} arquivo=${req.file.originalname} livro_id=${livroId} isImage=${isImage}`);
+  console.log(`[process] Nova requisição — tipo=${tipo} páginas=${uploadedFiles.length} arquivo=${primaryFile.originalname} livro_id=${livroId}`);
 
   // Always reload config from DB to pick up any changes saved after startup
   await loadConfigFromDb(pool).catch(() => {});
@@ -302,27 +306,32 @@ router.post('/', upload.single('file'), async (req, res) => {
   const model    = getActiveModel();
 
   const arquivoInfo = {
-    arquivo_path: filePath,
-    arquivo_nome: req.file.originalname,
-    arquivo_tipo: req.file.mimetype,
-    arquivo_url:  `/files/${req.file.filename}`
+    arquivo_path:  primaryFile.path,
+    arquivo_nome:  primaryFile.originalname,
+    arquivo_tipo:  primaryFile.mimetype,
+    arquivo_url:   `/files/${primaryFile.filename}`,
+    arquivos_urls: uploadedFiles.map(f => `/files/${f.filename}`),
   };
 
   let allRegistros = [];
   let podError     = null;
 
-  const base64 = imageBuffer.toString('base64');
+  const base64s = uploadedFiles.map(f => fs.readFileSync(f.path).toString('base64'));
 
-  // Select prompt based on document type
+  // Select prompt based on document type; add multi-page context when needed
   let prompt;
   if (tipo === 'testamento') prompt = TESTAMENTO_PROMPT;
   else if (tipo === 'escritura') prompt = ESCRITURA_PROMPT;
   else prompt = buildPrompt(livro, null); // nascimento — count hint added below
 
+  if (uploadedFiles.length > 1 && tipo !== 'nascimento') {
+    prompt = `Este documento tem ${uploadedFiles.length} páginas. Analise TODAS as páginas em sequência como partes de UM ÚNICO DOCUMENTO e retorne apenas UM registro JSON consolidado com os dados completos.\n\n` + prompt;
+  }
+
   if (provider === 'openai') {
     console.log(`[process] API externa: ${getExtConfig().model}`);
     try {
-      allRegistros = await callModelExternal(base64, prompt);
+      allRegistros = await callModelExternal(base64s, prompt);
       console.log(`[process] API externa: ${allRegistros.length} registro(s)`);
     } catch (e) {
       console.warn('[process] API externa falhou:', e.message);
@@ -341,14 +350,14 @@ router.post('/', upload.single('file'), async (req, res) => {
     let finalPrompt = prompt;
     if (tipo === 'nascimento') {
       const recordCount = isImage
-        ? await detectRecordCount(imageBuffer, model, getOllamaBase())
+        ? await detectRecordCount(fs.readFileSync(primaryFile.path), model, getOllamaBase())
         : 1;
       finalPrompt = buildPrompt(livro, recordCount > 1 ? recordCount : null);
       console.log(`[process] Processando imagem completa (${recordCount} registro(s) detectados) → ${model}`);
     }
 
     try {
-      const records = await callModel(model, base64, finalPrompt);
+      const records = await callModel(model, base64s, finalPrompt);
       console.log(`[process] ${model}: ${records.length} registro(s)`);
       allRegistros = records;
     } catch (e) {
@@ -357,7 +366,7 @@ router.post('/', upload.single('file'), async (req, res) => {
       if (model !== fallback) {
         console.log(`[process] Tentando modelo padrão como fallback: ${fallback}`);
         try {
-          const records = await callModel(fallback, base64, finalPrompt);
+          const records = await callModel(fallback, base64s, finalPrompt);
           console.log(`[process] ${fallback} (fallback): ${records.length} registro(s)`);
           allRegistros = records;
           podError = `Modelo "${model}" indisponível — processado com "${fallback}"`;

@@ -65,6 +65,8 @@ async function initDb() {
   await pool.query(`ALTER TABLE livros ADD COLUMN IF NOT EXISTS arquivo_capa_url  VARCHAR(500)`).catch(() => {});
   await pool.query(`ALTER TABLE registros_nascimento ADD COLUMN IF NOT EXISTS campos_bbox JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE registros_nascimento ADD COLUMN IF NOT EXISTS arquivo_url VARCHAR(500)`).catch(() => {});
+  await pool.query(`ALTER TABLE registros_escritura  ADD COLUMN IF NOT EXISTS arquivos_urls JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE registros_testamento ADD COLUMN IF NOT EXISTS arquivos_urls JSONB`).catch(() => {});
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS registros_testamento (

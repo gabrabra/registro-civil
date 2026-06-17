@@ -59,12 +59,13 @@ export const escriturasApi = {
 };
 
 export const processApi = {
-  // tipoOrProgress: backward-compat — pass string tipo OR onProgress function
-  file: (file, livroId, tipoOrProgress, onProgress) => {
+  // files: single File or array of Files; tipoOrProgress: string tipo OR onProgress function
+  file: (files, livroId, tipoOrProgress, onProgress) => {
     const tipo       = typeof tipoOrProgress === 'string' ? tipoOrProgress : null;
     const progressFn = typeof tipoOrProgress === 'function' ? tipoOrProgress : onProgress;
     const form = new FormData();
-    form.append('file', file);
+    const fileArray = Array.isArray(files) ? files : [files];
+    fileArray.forEach(f => form.append('files', f));
     if (livroId) form.append('livro_id', livroId);
     if (tipo) form.append('tipo', tipo);
     return http.post('/process', form, {
