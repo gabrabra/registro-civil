@@ -228,12 +228,80 @@ async function callModelAnthropic(base64s, prompt) {
   return parseJsonFromText(rawContent);
 }
 
-async function callModelExternal(base64s, prompt) {
+async function callModelMistralOCR(base64s, prompt, mimetypes) {
+  const { key, model, resolvedUrl } = getExtConfig();
+  const baseUrl    = (resolvedUrl || 'https://api.mistral.ai/v1').replace(/\/$/, '');
+  const chatModel  = model || 'mistral-small-latest';
+
+  // Step 1: OCR each file with mistral-ocr-latest
+  const ocrPages = [];
+  for (let i = 0; i < base64s.length; i++) {
+    const b64  = base64s[i];
+    const mime = (mimetypes && mimetypes[i]) ? mimetypes[i] : 'image/jpeg';
+
+    const document = mime === 'application/pdf'
+      ? { type: 'document_url', document_url: `data:application/pdf;base64,${b64}` }
+      : { type: 'image_url',    image_url:    `data:${mime};base64,${b64}` };
+
+    let ocrResp;
+    try {
+      ocrResp = await axios.post(`${baseUrl}/ocr`, {
+        model: 'mistral-ocr-latest',
+        document,
+      }, {
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        timeout: 120000,
+      });
+    } catch (err) {
+      const detail = err.response?.data?.message || err.response?.data?.error || err.message;
+      throw new Error(`Mistral OCR: ${detail}`);
+    }
+
+    const pages = ocrResp.data?.pages || [];
+    pages.forEach(p => ocrPages.push(p.markdown || ''));
+    console.log(`[callModelMistralOCR] Arquivo ${i + 1}: ${pages.length} página(s), ${pages.reduce((s, p) => s + (p.markdown?.length || 0), 0)} chars`);
+  }
+
+  const ocrText = ocrPages.join('\n\n---\n\n').trim();
+  if (!ocrText) throw new Error('Mistral OCR não extraiu texto do documento.');
+
+  console.log(`[callModelMistralOCR] OCR total: ${ocrText.length} chars → estruturando com ${chatModel}`);
+
+  // Step 2: Structure the extracted text with a Mistral chat model
+  const structurePrompt =
+    'Você recebeu o seguinte texto extraído por OCR de um documento de cartório:\n\n' +
+    '```\n' + ocrText + '\n```\n\n' +
+    'Com base APENAS no texto acima, execute as instruções a seguir. ' +
+    'Ignore qualquer instrução que mencione "imagem" — use o texto como fonte de dados.\n\n' +
+    prompt;
+
+  let chatResp;
+  try {
+    chatResp = await axios.post(`${baseUrl}/chat/completions`, {
+      model: chatModel,
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: structurePrompt }],
+    }, {
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      timeout: 120000,
+    });
+  } catch (err) {
+    const detail = err.response?.data?.message || err.response?.data?.error || err.message;
+    throw new Error(`Mistral chat (${chatModel}): ${detail}`);
+  }
+
+  const rawContent = chatResp.data?.choices?.[0]?.message?.content || '';
+  console.log(`[callModelMistralOCR] ${chatModel}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
+  return parseJsonFromText(rawContent);
+}
+
+async function callModelExternal(base64s, prompt, mimetypes) {
   const { key, model, tipo, resolvedUrl } = getExtConfig();
   if (!key || !model) throw new Error('API externa não configurada (preencha chave e modelo nas Configurações)');
   if (!resolvedUrl) throw new Error('URL base não configurada (preencha nas Configurações)');
 
   if (tipo === 'anthropic') return callModelAnthropic(base64s, prompt);
+  if (tipo === 'mistral')   return callModelMistralOCR(base64s, prompt, mimetypes);
 
   const imageBlocks = base64s.map(b => ({
     type: 'image_url',
@@ -316,7 +384,8 @@ router.post('/', upload, async (req, res) => {
   let allRegistros = [];
   let podError     = null;
 
-  const base64s = uploadedFiles.map(f => fs.readFileSync(f.path).toString('base64'));
+  const base64s  = uploadedFiles.map(f => fs.readFileSync(f.path).toString('base64'));
+  const mimetypes = uploadedFiles.map(f => f.mimetype);
 
   // Select prompt based on document type; add multi-page context when needed
   let prompt;
@@ -331,7 +400,7 @@ router.post('/', upload, async (req, res) => {
   if (provider === 'openai') {
     console.log(`[process] API externa: ${getExtConfig().model}`);
     try {
-      allRegistros = await callModelExternal(base64s, prompt);
+      allRegistros = await callModelExternal(base64s, prompt, mimetypes);
       console.log(`[process] API externa: ${allRegistros.length} registro(s)`);
     } catch (e) {
       console.warn('[process] API externa falhou:', e.message);

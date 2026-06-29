@@ -17,6 +17,7 @@ const PROVIDER_BASE_URLS = {
   openai:    'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com/v1',
   deepseek:  'https://api.deepseek.com/v1',
+  mistral:   'https://api.mistral.ai/v1',
 };
 
 console.log(`[runpod] POD_ID="${_podId}" OLLAMA_BASE="${_ollamaBase}" API_KEY=${API_KEY ? 'SET' : 'NOT SET'}`);

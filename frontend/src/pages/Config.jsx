@@ -90,12 +90,14 @@ export default function Config() {
     openai:    ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
     anthropic: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
     deepseek:  ['deepseek-chat', 'deepseek-reasoner', 'deepseek-vl2'],
+    mistral:   ['mistral-small-latest', 'mistral-large-latest', 'open-mistral-nemo'],
     generico:  [],
   };
   const TIPO_HINTS = {
     openai:    { endpoint: 'https://api.openai.com/v1', link: 'https://platform.openai.com/api-keys', linkLabel: 'platform.openai.com' },
     anthropic: { endpoint: 'https://api.anthropic.com/v1', link: 'https://console.anthropic.com', linkLabel: 'console.anthropic.com' },
     deepseek:  { endpoint: 'https://api.deepseek.com/v1', link: 'https://platform.deepseek.com', linkLabel: 'platform.deepseek.com' },
+    mistral:   { endpoint: 'https://api.mistral.ai/v1', link: 'https://console.mistral.ai', linkLabel: 'console.mistral.ai', note: 'OCR em 2 etapas: mistral-ocr-latest extrai o texto, o modelo abaixo estrutura em JSON.' },
     generico:  null,
   };
   const modeloIsCustom = MODELOS_POR_TIPO[extTipo]?.length > 0 && !MODELOS_POR_TIPO[extTipo].includes(extModel);
@@ -273,6 +275,7 @@ export default function Config() {
                   { value: 'openai',    label: 'OpenAI' },
                   { value: 'anthropic', label: 'Anthropic' },
                   { value: 'deepseek',  label: 'DeepSeek' },
+                  { value: 'mistral',   label: 'Mistral OCR' },
                   { value: 'generico',  label: 'Genérico (OpenAI-compatível)' },
                 ].map(opt => (
                   <label key={opt.value}
@@ -295,6 +298,9 @@ export default function Config() {
                 <p>Endpoint: <code className="bg-white border border-slate-200 px-1 rounded font-mono">{TIPO_HINTS[extTipo].endpoint}</code></p>
                 <p>Gere sua chave em <a href={TIPO_HINTS[extTipo].link} target="_blank" rel="noopener noreferrer"
                   className="underline text-blue-600 hover:text-blue-800">{TIPO_HINTS[extTipo].linkLabel}</a></p>
+                {TIPO_HINTS[extTipo].note && (
+                  <p className="mt-1 text-blue-700 font-medium">{TIPO_HINTS[extTipo].note}</p>
+                )}
               </div>
             )}
 
@@ -311,7 +317,9 @@ export default function Config() {
 
             {/* Modelo */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Modelo</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                {extTipo === 'mistral' ? 'Modelo de estruturação (após OCR)' : 'Modelo'}
+              </label>
               {MODELOS_POR_TIPO[extTipo]?.length > 0 ? (
                 <>
                   <select
