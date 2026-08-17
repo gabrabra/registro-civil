@@ -119,8 +119,34 @@ const BASE_PROMPT =
   '  }\n\n' +
   'Se não houver registros de nascimento visíveis, use "registros": [] — mas SEMPRE preencha "transcricao_completa".';
 
-function buildPrompt(livro, recordCountHint) {
-  if (!livro && !recordCountHint) return BASE_PROMPT;
+// Batch import feeds whole books page by page, so a page may be the cover
+// rather than records. Classifying here costs nothing extra — same call.
+const CAPA_INSTRUCAO =
+  '\n\nATENÇÃO — ESTA PÁGINA PODE SER A CAPA (folha de rosto) DO LIVRO.\n' +
+  'Antes de extrair registros, decida o que a página é:\n' +
+  '- CAPA: identifica o livro como um todo (número/código do livro, cartório, CNPJ/CNS, ' +
+  'intervalo de termos, período de datas, município). Não traz registros individuais de pessoas.\n' +
+  '- PÁGINA DE REGISTROS: traz termos/assentos de nascimento de pessoas.\n\n' +
+  'Se for CAPA, responda com "eh_capa": true, "registros": [] e preencha "dados_livro":\n' +
+  '{\n' +
+  '  "numero": "número/código do livro, ex: A-74",\n' +
+  '  "cartorio": "nome completo do cartório ou null",\n' +
+  '  "cnpj": "CNPJ se visível ou null",\n' +
+  '  "cns": "CNS se visível ou null",\n' +
+  '  "termo_inicio": número inteiro do primeiro termo ou null,\n' +
+  '  "termo_fim": número inteiro do último termo ou null,\n' +
+  '  "data_inicio": "YYYY-MM-DD ou null",\n' +
+  '  "data_fim": "YYYY-MM-DD ou null",\n' +
+  '  "municipio": "nome do município ou null",\n' +
+  '  "estado": "sigla UF ou null"\n' +
+  '}\n\n' +
+  'Se for PÁGINA DE REGISTROS, responda com "eh_capa": false, "dados_livro": null e preencha "registros" normalmente.\n' +
+  'Em qualquer um dos casos, SEMPRE preencha "transcricao_completa".\n' +
+  'Na dúvida entre os dois, prefira "eh_capa": false.';
+
+function buildPrompt(livro, recordCountHint, detectarCapa) {
+  const capa = detectarCapa ? CAPA_INSTRUCAO : '';
+  if (!livro && !recordCountHint) return BASE_PROMPT + capa;
 
   const yearStart = livro?.data_inicio ? new Date(livro.data_inicio).getFullYear() : null;
   const yearEnd   = livro?.data_fim    ? new Date(livro.data_fim).getFullYear()    : null;
@@ -146,12 +172,14 @@ function buildPrompt(livro, recordCountHint) {
       ctx += `\n"municipio" deve ser "${livro.municipio}" e "estado" deve ser "${livro.estado || '?'}" conforme o livro.`;
   }
 
-  if (recordCountHint && recordCountHint > 1) {
+  // A count hint would contradict the cover branch, so only apply it when the
+  // page is known to hold records
+  if (recordCountHint && recordCountHint > 1 && !detectarCapa) {
     ctx += `\n\nIMPORTANTE: Esta imagem contém EXATAMENTE ${recordCountHint} registros de nascimento.`;
     ctx += ` Você DEVE retornar um array com EXATAMENTE ${recordCountHint} objetos — um por registro. Não retorne array vazio.`;
   }
 
-  return BASE_PROMPT + ctx;
+  return BASE_PROMPT + ctx + capa;
 }
 
 async function getLivro(livroId) {
@@ -413,6 +441,8 @@ router.post('/', upload, async (req, res) => {
   const livroId     = req.body.livro_id || null;
   const tipo        = req.body.tipo || 'nascimento';
   const isImage     = /image\/(jpeg|png|webp|tiff)/.test(primaryFile.mimetype);
+  // Batch import feeds whole books, so a page may be the cover
+  const detectarCapa = tipo === 'nascimento' && /^(1|true)$/i.test(String(req.body.detectar_capa || ''));
 
   console.log(`[process] Nova requisição — tipo=${tipo} páginas=${uploadedFiles.length} arquivo=${primaryFile.originalname} livro_id=${livroId}`);
 
@@ -433,6 +463,8 @@ router.post('/', upload, async (req, res) => {
 
   let allRegistros = [];
   let transcricao  = null;
+  let ehCapa       = false;
+  let dadosLivro   = null;
   let podError     = null;
 
   const base64s  = uploadedFiles.map(f => fs.readFileSync(f.path).toString('base64'));
@@ -442,7 +474,7 @@ router.post('/', upload, async (req, res) => {
   let prompt;
   if (tipo === 'testamento') prompt = TESTAMENTO_PROMPT;
   else if (tipo === 'escritura') prompt = ESCRITURA_PROMPT;
-  else prompt = buildPrompt(livro, null); // nascimento — count hint added below
+  else prompt = buildPrompt(livro, null, detectarCapa); // nascimento — count hint added below
 
   if (uploadedFiles.length > 1 && tipo !== 'nascimento') {
     prompt = `Este documento tem ${uploadedFiles.length} páginas. Analise TODAS as páginas em sequência como partes de UM ÚNICO DOCUMENTO.\n` +
@@ -456,6 +488,8 @@ router.post('/', upload, async (req, res) => {
       const result = await callModelExternal(base64s, prompt, mimetypes);
       allRegistros = result.registros;
       transcricao  = result.transcricao;
+      ehCapa       = result.ehCapa;
+      dadosLivro   = result.dadosLivro;
       if (result.erro) podError = result.erro;
       console.log(`[process] API externa: ${allRegistros.length} registro(s), transcrição ${transcricao?.length || 0} chars`);
     } catch (e) {
@@ -477,7 +511,7 @@ router.post('/', upload, async (req, res) => {
       const recordCount = isImage
         ? await detectRecordCount(fs.readFileSync(primaryFile.path), model, getOllamaBase())
         : 1;
-      finalPrompt = buildPrompt(livro, recordCount > 1 ? recordCount : null);
+      finalPrompt = buildPrompt(livro, recordCount > 1 ? recordCount : null, detectarCapa);
       console.log(`[process] Processando imagem completa (${recordCount} registro(s) detectados) → ${model}`);
     }
 
@@ -486,6 +520,8 @@ router.post('/', upload, async (req, res) => {
       console.log(`[process] ${model}: ${result.registros.length} registro(s), transcrição ${result.transcricao?.length || 0} chars`);
       allRegistros = result.registros;
       transcricao  = result.transcricao;
+      ehCapa       = result.ehCapa;
+      dadosLivro   = result.dadosLivro;
     } catch (e) {
       console.warn(`[process] ${model} falhou:`, e.message);
       const fallback = 'qwen2.5vl:7b';
@@ -496,6 +532,8 @@ router.post('/', upload, async (req, res) => {
           console.log(`[process] ${fallback} (fallback): ${result.registros.length} registro(s)`);
           allRegistros = result.registros;
           transcricao  = result.transcricao;
+          ehCapa       = result.ehCapa;
+          dadosLivro   = result.dadosLivro;
           podError = `Modelo "${model}" indisponível — processado com "${fallback}"`;
         } catch (e2) {
           console.warn(`[process] ${fallback} também falhou:`, e2.message);
@@ -511,11 +549,15 @@ router.post('/', upload, async (req, res) => {
   const registros = tipo === 'nascimento' ? applyBookConstraints(allRegistros, livro) : allRegistros;
   console.log(`[process] Resultado final: ${registros.length} registro(s), transcrição ${transcricao?.length || 0} chars`);
 
-  const noRecords = registros.length === 0;
+  // A cover legitimately carries no records — it must not be reported as a failure
+  const noRecords = registros.length === 0 && !ehCapa;
+  if (ehCapa) console.log(`[process] Página identificada como CAPA — livro "${dadosLivro?.numero || '?'}"`);
+
   scheduleIdleStop();
   res.json({
     registros,
     transcricao_completa: transcricao || null,
+    ...(detectarCapa ? { eh_capa: ehCapa, dados_livro: dadosLivro } : {}),
     ...arquivoInfo,
     ...(noRecords ? {
       ai_error: true,

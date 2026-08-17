@@ -139,6 +139,42 @@ function ReviewCard({ item, itemIndex, onSaveRecord, onUpdateRecord, onUpdateTra
   const savedCount  = item.savedRecords.filter(Boolean).length;
   const allSaved    = registros.length > 0 && savedCount === registros.length;
 
+  // Cover page — no records to save; it defines the book for the pages after it
+  if (item.capa?.detectada) {
+    const l = item.capa.livro;
+    return (
+      <div className="rounded-xl border border-violet-300 bg-white shadow-sm overflow-hidden">
+        <div className="px-4 py-3 bg-violet-50 border-b border-violet-100 flex items-center gap-2">
+          <BookOpen className="w-4 h-4 text-violet-500 flex-shrink-0" />
+          <span className="text-sm font-medium text-slate-800 truncate">{item.file.name}</span>
+          <span className="text-xs font-medium text-violet-700 ml-auto flex-shrink-0">Capa de livro</span>
+        </div>
+        <div className="px-4 py-3">
+          {item.capa.vinculado ? (
+            <p className="text-sm text-slate-700">
+              Livro <strong>{l?.numero}</strong>{l?.cartorio ? ` — ${l.cartorio}` : ''}
+              {l?.municipio ? ` (${l.municipio}/${l.estado || '?'})` : ''}{' '}
+              <span className="text-violet-700">
+                {item.capa.criado ? 'criado a partir desta capa' : 'já existia e foi reaproveitado'}
+              </span>. As próximas páginas serão vinculadas a ele.
+            </p>
+          ) : (
+            <p className="text-sm text-amber-700">{item.capa.aviso}</p>
+          )}
+        </div>
+        {transcricao && (
+          <div className="p-3 border-t border-slate-100">
+            <TranscricaoPanel
+              value={transcricao}
+              onChange={text => onUpdateTranscricao(itemIndex, text)}
+              defaultOpen={false}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (registros.length === 0) {
     return (
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">

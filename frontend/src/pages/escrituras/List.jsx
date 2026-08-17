@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Eye, Pencil, Trash2, FolderOpen, ChevronLeft, ChevronRight, X, BookOpen, ArrowLeft } from 'lucide-react';
 import { escriturasApi } from '../../api.js';
+import { useBulkSelection } from '../../components/useBulkSelection.js';
+import { BulkBar, SelectAllCheckbox, RowCheckbox } from '../../components/BulkBar.jsx';
 
 function Toast({ msg, type, onClose }) {
   useEffect(() => { const t = setTimeout(onClose, 4000); return () => clearTimeout(t); }, []);
@@ -140,6 +142,8 @@ export default function EscriturasList() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setPage(1); }, [search, livroId]);
 
+  const bulk = useBulkSelection(records, { remove: escriturasApi.remove, onDone: load });
+
   async function handleDelete(id) {
     if (!confirm('Confirma exclusão deste registro?')) return;
     setDeleting(id);
@@ -152,6 +156,16 @@ export default function EscriturasList() {
     } finally {
       setDeleting(null);
     }
+  }
+
+  async function handleBulkDelete() {
+    const n = bulk.count;
+    if (!confirm(`Confirma exclusão de ${n} escritura${n !== 1 ? 's' : ''}? Esta ação não pode ser desfeita.`)) return;
+    const r = await bulk.removerSelecionados();
+    if (!r) return;
+    setToast(r.falhas.length
+      ? { msg: `${r.ok} de ${r.total} excluída(s) — ${r.falhas.length} falhou(ram)`, type: 'error' }
+      : { msg: `${r.ok} escritura${r.ok !== 1 ? 's' : ''} excluída${r.ok !== 1 ? 's' : ''}`, type: 'success' });
   }
 
   const totalPages = Math.ceil(total / limit);
@@ -208,11 +222,27 @@ export default function EscriturasList() {
         )}
       </div>
 
+      <BulkBar
+        count={bulk.count}
+        onClear={bulk.limpar}
+        onDelete={handleBulkDelete}
+        removing={bulk.removing}
+        entidade="escritura"
+      />
+
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3.5 w-10">
+                  <SelectAllCheckbox
+                    checked={bulk.todosMarcados}
+                    indeterminate={bulk.algunsMarcados}
+                    onChange={bulk.toggleTodos}
+                    disabled={loading || records.length === 0}
+                  />
+                </th>
                 <th className="text-left px-5 py-3.5 font-semibold text-slate-600">Vendedor</th>
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600">Comprador</th>
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-24">Livro</th>
@@ -223,11 +253,11 @@ export default function EscriturasList() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={6} className="text-center py-12 text-slate-400">Carregando...</td></tr>
+                <tr><td colSpan={7} className="text-center py-12 text-slate-400">Carregando...</td></tr>
               )}
               {!loading && records.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="text-center py-12">
+                  <td colSpan={7} className="text-center py-12">
                     <p className="text-slate-400 text-sm">Nenhum registro encontrado</p>
                     {!search && (
                       <button onClick={() => navigate(novoUrl)}
@@ -240,7 +270,14 @@ export default function EscriturasList() {
                 </tr>
               )}
               {records.map((r, i) => (
-                <tr key={r.id} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${i % 2 === 0 ? '' : 'bg-slate-50/30'}`}>
+                <tr key={r.id} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${bulk.isSelected(r.id) ? 'bg-blue-50/60' : (i % 2 === 0 ? '' : 'bg-slate-50/30')}`}>
+                  <td className="px-4 py-3.5">
+                    <RowCheckbox
+                      checked={bulk.isSelected(r.id)}
+                      onChange={() => bulk.toggle(r.id)}
+                      label={`Selecionar escritura de ${r.vendedor || 'vendedor não informado'}`}
+                    />
+                  </td>
                   <td className="px-5 py-3.5 font-medium text-slate-800">
                     {r.vendedor || <span className="text-slate-400 italic">Não informado</span>}
                   </td>

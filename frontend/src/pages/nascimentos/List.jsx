@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Upload, Eye, Pencil, Trash2, FolderOpen, ChevronLeft, ChevronRight, X, BookOpen, ArrowLeft, ScanSearch, Loader2 } from 'lucide-react';
 import { nascimentosApi } from '../../api.js';
 import ImageViewer from '../../components/ImageViewer.jsx';
+import { useBulkSelection } from '../../components/useBulkSelection.js';
+import { BulkBar, SelectAllCheckbox, RowCheckbox } from '../../components/BulkBar.jsx';
 
 function Toast({ msg, type, onClose }) {
   useEffect(() => { const t = setTimeout(onClose, 4000); return () => clearTimeout(t); }, []);
@@ -215,6 +217,8 @@ export default function NascimentosList() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setPage(1); }, [search, livroId]);
 
+  const bulk = useBulkSelection(records, { remove: nascimentosApi.remove, onDone: load });
+
   async function handleDelete(id) {
     if (!confirm('Confirma exclusão deste registro?')) return;
     setDeleting(id);
@@ -227,6 +231,16 @@ export default function NascimentosList() {
     } finally {
       setDeleting(null);
     }
+  }
+
+  async function handleBulkDelete() {
+    const n = bulk.count;
+    if (!confirm(`Confirma exclusão de ${n} registro${n !== 1 ? 's' : ''}? Esta ação não pode ser desfeita.`)) return;
+    const r = await bulk.removerSelecionados();
+    if (!r) return;
+    setToast(r.falhas.length
+      ? { msg: `${r.ok} de ${r.total} excluído(s) — ${r.falhas.length} falhou(ram)`, type: 'error' }
+      : { msg: `${r.ok} registro${r.ok !== 1 ? 's' : ''} excluído${r.ok !== 1 ? 's' : ''}`, type: 'success' });
   }
 
   const totalPages = Math.ceil(total / limit);
@@ -303,12 +317,28 @@ export default function NascimentosList() {
         )}
       </div>
 
+      <BulkBar
+        count={bulk.count}
+        onClear={bulk.limpar}
+        onDelete={handleBulkDelete}
+        removing={bulk.removing}
+        entidade="registro"
+      />
+
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3.5 w-10">
+                  <SelectAllCheckbox
+                    checked={bulk.todosMarcados}
+                    indeterminate={bulk.algunsMarcados}
+                    onChange={bulk.toggleTodos}
+                    disabled={loading || records.length === 0}
+                  />
+                </th>
                 <th className="text-left px-5 py-3.5 font-semibold text-slate-600">Nome</th>
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-24">Livro</th>
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-20">Folha</th>
@@ -319,11 +349,11 @@ export default function NascimentosList() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={6} className="text-center py-12 text-slate-400">Carregando...</td></tr>
+                <tr><td colSpan={7} className="text-center py-12 text-slate-400">Carregando...</td></tr>
               )}
               {!loading && records.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="text-center py-12">
+                  <td colSpan={7} className="text-center py-12">
                     <p className="text-slate-400 text-sm">Nenhum registro encontrado</p>
                     {search && <p className="text-slate-400 text-xs mt-1">Tente outro termo de busca</p>}
                     {!search && livroId && (
@@ -337,7 +367,14 @@ export default function NascimentosList() {
                 </tr>
               )}
               {records.map((r, i) => (
-                <tr key={r.id} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${i % 2 === 0 ? '' : 'bg-slate-50/30'}`}>
+                <tr key={r.id} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${bulk.isSelected(r.id) ? 'bg-blue-50/60' : (i % 2 === 0 ? '' : 'bg-slate-50/30')}`}>
+                  <td className="px-4 py-3.5">
+                    <RowCheckbox
+                      checked={bulk.isSelected(r.id)}
+                      onChange={() => bulk.toggle(r.id)}
+                      label={`Selecionar ${r.nome_completo || 'registro'}`}
+                    />
+                  </td>
                   <td className="px-5 py-3.5 font-medium text-slate-800">
                     {r.nome_completo || <span className="text-slate-400 italic">Não informado</span>}
                   </td>

@@ -33,25 +33,31 @@ function tryParse(candidate) {
   return null;
 }
 
+// Keys that carry page-level metadata rather than record fields
+const META_KEYS = ['transcricao_completa', 'transcricao', 'eh_capa', 'dados_livro'];
+
 function normalizeParsed(parsed) {
   // Legacy shape: a bare array of records
-  if (Array.isArray(parsed)) return { transcricao: null, registros: parsed };
+  if (Array.isArray(parsed)) return { transcricao: null, registros: parsed, ehCapa: false, dadosLivro: null };
 
   if (parsed && typeof parsed === 'object') {
     const transcricao = parsed.transcricao_completa || parsed.transcricao || null;
-    if (Array.isArray(parsed.registros)) return { transcricao, registros: parsed.registros };
+    const ehCapa      = parsed.eh_capa === true;
+    const dadosLivro  = (parsed.dados_livro && typeof parsed.dados_livro === 'object') ? parsed.dados_livro : null;
 
-    // Object with no "registros" key. If the transcription is all it carries,
-    // there are no records; otherwise treat the object itself as one record.
-    const otherKeys = Object.keys(parsed).filter(k => k !== 'transcricao_completa' && k !== 'transcricao');
-    return { transcricao, registros: otherKeys.length ? [parsed] : [] };
+    if (Array.isArray(parsed.registros)) return { transcricao, registros: parsed.registros, ehCapa, dadosLivro };
+
+    // Object with no "registros" key. If it only carries page metadata there
+    // are no records; otherwise treat the object itself as one record.
+    const otherKeys = Object.keys(parsed).filter(k => !META_KEYS.includes(k));
+    return { transcricao, registros: otherKeys.length ? [parsed] : [], ehCapa, dadosLivro };
   }
   return null;
 }
 
 function parseResultFromText(text) {
   const content = String(text || '').replace(/```json\n?|\n?```/g, '').trim();
-  if (!content) return { transcricao: null, registros: [] };
+  if (!content) return { transcricao: null, registros: [], ehCapa: false, dadosLivro: null };
 
   const candidates = [content];
 
@@ -71,7 +77,7 @@ function parseResultFromText(text) {
 
   // Nothing parsed — keep the raw reading rather than losing the page entirely
   console.warn('[parseResult] JSON inválido — preservando resposta bruta como transcrição');
-  return { transcricao: content, registros: [] };
+  return { transcricao: content, registros: [], ehCapa: false, dadosLivro: null };
 }
 
 module.exports = { parseResultFromText, repairJsonControlChars };

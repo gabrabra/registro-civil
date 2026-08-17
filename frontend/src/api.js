@@ -60,7 +60,8 @@ export const escriturasApi = {
 
 export const processApi = {
   // files: single File or array of Files; tipoOrProgress: string tipo OR onProgress function
-  file: (files, livroId, tipoOrProgress, onProgress) => {
+  // opts.detectarCapa asks the backend to classify the page as cover vs records
+  file: (files, livroId, tipoOrProgress, onProgress, opts = {}) => {
     const tipo       = typeof tipoOrProgress === 'string' ? tipoOrProgress : null;
     const progressFn = typeof tipoOrProgress === 'function' ? tipoOrProgress : onProgress;
     const form = new FormData();
@@ -68,6 +69,7 @@ export const processApi = {
     fileArray.forEach(f => form.append('files', f));
     if (livroId) form.append('livro_id', livroId);
     if (tipo) form.append('tipo', tipo);
+    if (opts.detectarCapa) form.append('detectar_capa', '1');
     return http.post('/process', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 600000,
