@@ -2,32 +2,43 @@ import { NavLink } from 'react-router-dom';
 import { Users, BookHeart, Library, ChevronDown, ChevronRight, Power, Loader2, Settings, Home } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { podApi } from '../api.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
+// `modulo` gates the entry: an item is hidden when the profile can't even view it.
 const sections = [
   {
     label: 'Acervo',
     icon: Library,
     items: [
-      { to: '/livros', label: 'Estante de Livros' },
+      { to: '/livros', label: 'Estante de Livros', modulo: 'livros' },
     ]
   },
   {
     label: 'Registro Civil',
     icon: Users,
     items: [
-      { to: '/nascimentos', label: 'Nascimentos' },
-      { to: '/obitos',      label: 'Óbitos' },
-      { to: '/casamentos',  label: 'Casamentos' },
-      { to: '/testamentos', label: 'Testamentos' },
+      { to: '/nascimentos', label: 'Nascimentos', modulo: 'nascimento' },
+      { to: '/obitos',      label: 'Óbitos',      modulo: 'obito' },
+      { to: '/casamentos',  label: 'Casamentos',  modulo: 'casamento' },
+      { to: '/testamentos', label: 'Testamentos', modulo: 'testamento' },
     ]
   },
   {
     label: 'Registro de Imóveis',
     icon: Home,
     items: [
-      { to: '/escrituras-compra-venda', label: 'Compra e Venda' },
+      { to: '/escrituras-compra-venda', label: 'Compra e Venda', modulo: 'escritura' },
     ]
-  }
+  },
+  {
+    label: 'Configurações',
+    icon: Settings,
+    items: [
+      { to: '/configuracoes',         label: 'Geral e IA',      modulo: 'configuracoes' },
+      { to: '/configuracoes/usuarios', label: 'Usuários',        modulo: 'usuarios' },
+      { to: '/configuracoes/perfis',   label: 'Perfis de Acesso', modulo: 'perfis' },
+    ]
+  },
 ];
 
 function PodWidget() {
@@ -107,7 +118,15 @@ function PodWidget() {
 }
 
 export default function Sidebar() {
-  const [open, setOpen] = useState({ Acervo: true, 'Registro Civil': true, 'Registro de Imóveis': true });
+  const { pode, user, cota } = useAuth();
+  const [open, setOpen] = useState({
+    Acervo: true, 'Registro Civil': true, 'Registro de Imóveis': true, 'Configurações': false,
+  });
+
+  // Hide entries the profile can't view, and drop sections left empty
+  const visiveis = sections
+    .map(sec => ({ ...sec, items: sec.items.filter(i => pode(i.modulo, 'ver')) }))
+    .filter(sec => sec.items.length > 0);
 
   return (
     <aside className="w-60 min-h-screen bg-sidebar flex flex-col">
@@ -119,7 +138,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 py-4 overflow-y-auto">
-        {sections.map(sec => {
+        {visiveis.map(sec => {
           const Icon = sec.icon;
           const isOpen = open[sec.label];
           return (
@@ -157,21 +176,26 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="px-3 pb-2">
-        <NavLink
-          to="/configuracoes"
-          className={({ isActive }) =>
-            `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-              isActive
-                ? 'text-blue-400 bg-blue-900/30 font-medium'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-            }`
-          }
-        >
-          <Settings className="w-4 h-4 flex-shrink-0" />
-          Configurações
-        </NavLink>
-      </div>
+      {/* Quem tem cota vê o quanto já usou, sem precisar abrir outra tela */}
+      {user && !cota.ilimitada && (
+        <div className="px-4 py-3 border-t border-white/10">
+          <div className="flex items-baseline justify-between mb-1.5">
+            <span className="text-xs text-slate-400">Seus registros</span>
+            <span className={`text-xs font-medium ${cota.restante === 0 ? 'text-red-400' : 'text-slate-300'}`}>
+              {cota.usados} / {cota.limite}
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${cota.restante === 0 ? 'bg-red-500' : 'bg-blue-500'}`}
+              style={{ width: `${Math.min(100, (cota.usados / Math.max(1, cota.limite)) * 100)}%` }}
+            />
+          </div>
+          {cota.restante === 0 && (
+            <p className="mt-1.5 text-xs text-red-400">Limite atingido — peça aumento a um administrador.</p>
+          )}
+        </div>
+      )}
 
       <PodWidget />
 

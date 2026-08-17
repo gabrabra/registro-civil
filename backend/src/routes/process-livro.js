@@ -5,6 +5,7 @@ const path    = require('path');
 const fs      = require('fs');
 const { v4: uuid } = require('uuid');
 const { ensurePodRunning, scheduleIdleStop, getOllamaBase, getActiveModel, getProvider, getExtConfig } = require('../utils/runpod');
+const { exigePermissao } = require('../middleware/permissao');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -113,7 +114,7 @@ async function callModelForCover(modelName, base64) {
   return JSON.parse(match[0]);
 }
 
-router.post('/livro-capa', upload.single('file'), async (req, res) => {
+router.post('/livro-capa', exigePermissao('livros', 'criar'), upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhuma imagem enviada' });
 
   // Keep the file — don't delete it

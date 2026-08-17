@@ -1,6 +1,7 @@
 const express = require('express');
 const path    = require('path');
 const { pool } = require('../db');
+const { exigePermissao, exigeCota } = require('../middleware/permissao');
 const router  = express.Router();
 
 function addArquivoUrl(row) {
@@ -12,7 +13,7 @@ function addArquivoUrl(row) {
 }
 
 // List with search + pagination + optional livro filter
-router.get('/', async (req, res) => {
+router.get('/', exigePermissao('testamento', 'ver'), async (req, res) => {
   try {
     const { search = '', page = 1, limit = 10, livro_id } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -49,7 +50,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.get('/:id', async (req, res) => {
+router.get('/:id', exigePermissao('testamento', 'ver'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio
@@ -65,7 +66,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', exigePermissao('testamento', 'criar'), exigeCota(), async (req, res) => {
   try {
     const f = req.body;
     const arquivoUrl = f.arquivo_url || (f.arquivo_path ? `/files/${path.basename(f.arquivo_path)}` : null);
@@ -73,8 +74,8 @@ router.post('/', async (req, res) => {
       `INSERT INTO registros_testamento
         (livro_id, testador, data_testamento, ano, livro, folha, tabeliao, testemunhas,
          municipio, estado, confianca, observacoes, transcricao_completa,
-         arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox, arquivos_urls)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+         arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox, arquivos_urls, criado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
@@ -87,6 +88,7 @@ router.post('/', async (req, res) => {
         arquivoUrl,
         f.campos_bbox ? JSON.stringify(f.campos_bbox) : null,
         f.arquivos_urls ? JSON.stringify(f.arquivos_urls) : null,
+        req.contexto.id,
       ]
     );
     res.status(201).json(addArquivoUrl(rows[0]));
@@ -96,7 +98,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', exigePermissao('testamento', 'editar'), async (req, res) => {
   try {
     const f = req.body;
     const { rows } = await pool.query(
@@ -125,7 +127,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', exigePermissao('testamento', 'excluir'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       'DELETE FROM registros_testamento WHERE id=$1 RETURNING arquivo_path', [req.params.id]

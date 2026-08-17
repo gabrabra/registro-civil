@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
+const { exigePermissao } = require('../middleware/permissao');
 const router = express.Router();
 
 const SELECT = `
@@ -12,7 +13,7 @@ const SELECT = `
 `;
 
 // List all
-router.get('/', async (_req, res) => {
+router.get('/', exigePermissao('livros', 'ver'), async (_req, res) => {
   try {
     const { rows } = await pool.query(`${SELECT} GROUP BY l.id ORDER BY l.estado, l.municipio, l.numero`);
     res.json(rows);
@@ -22,7 +23,7 @@ router.get('/', async (_req, res) => {
 });
 
 // Get one
-router.get('/:id', async (req, res) => {
+router.get('/:id', exigePermissao('livros', 'ver'), async (req, res) => {
   try {
     const { rows } = await pool.query(`${SELECT} WHERE l.id = $1 GROUP BY l.id`, [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
@@ -33,7 +34,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create
-router.post('/', async (req, res) => {
+router.post('/', exigePermissao('livros', 'criar'), async (req, res) => {
   try {
     const f = req.body;
     const { rows } = await pool.query(
@@ -54,7 +55,7 @@ router.post('/', async (req, res) => {
 });
 
 // Update
-router.put('/:id', async (req, res) => {
+router.put('/:id', exigePermissao('livros', 'editar'), async (req, res) => {
   try {
     const f = req.body;
     const { rows } = await pool.query(
@@ -79,7 +80,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // Delete
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', exigePermissao('livros', 'excluir'), async (req, res) => {
   try {
     const { rows } = await pool.query('DELETE FROM livros WHERE id=$1 RETURNING id', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });

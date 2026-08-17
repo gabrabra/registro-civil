@@ -16,6 +16,10 @@ http.interceptors.response.use(
       sessionStorage.removeItem('rc_token');
       window.location.href = '/login';
     }
+    // Surface the API's message (permission denied, quota reached) instead of
+    // the generic "Request failed with status code 403"
+    const detalhe = err.response?.data?.error;
+    if (detalhe) err.message = detalhe;
     return Promise.reject(err);
   }
 );
@@ -23,6 +27,23 @@ http.interceptors.response.use(
 export const authApi = {
   login: (email, senha) => http.post('/auth/login', { email, senha }).then(r => r.data),
   me:    ()             => http.get('/auth/me').then(r => r.data),
+};
+
+export const usuariosApi = {
+  list:   ()      => http.get('/usuarios').then(r => r.data),
+  get:    (id)    => http.get(`/usuarios/${id}`).then(r => r.data),
+  create: (data)  => http.post('/usuarios', data).then(r => r.data),
+  update: (id, d) => http.put(`/usuarios/${id}`, d).then(r => r.data),
+  remove: (id)    => http.delete(`/usuarios/${id}`).then(r => r.data),
+};
+
+export const perfisApi = {
+  list:     ()      => http.get('/perfis').then(r => r.data),
+  get:      (id)    => http.get(`/perfis/${id}`).then(r => r.data),
+  create:   (data)  => http.post('/perfis', data).then(r => r.data),
+  update:   (id, d) => http.put(`/perfis/${id}`, d).then(r => r.data),
+  remove:   (id)    => http.delete(`/perfis/${id}`).then(r => r.data),
+  catalogo: ()      => http.get('/perfis/catalogo').then(r => r.data),
 };
 
 export const livrosApi = {

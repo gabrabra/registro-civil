@@ -1,9 +1,29 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
+const { PERFIS_PADRAO, MODULOS_COM_REGISTRO } = require('./utils/permissoes');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
+// Record tables a user's creation quota is counted across
+const TABELAS_DE_REGISTRO = {
+  nascimento: 'registros_nascimento',
+  testamento: 'registros_testamento',
+  escritura:  'registros_escritura',
+};
+
 async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS perfis (
+      id          SERIAL PRIMARY KEY,
+      nome        VARCHAR(100) NOT NULL UNIQUE,
+      descricao   TEXT,
+      is_admin    BOOLEAN NOT NULL DEFAULT FALSE,
+      permissoes  JSONB NOT NULL DEFAULT '{}'::jsonb,
+      criado_em   TIMESTAMP DEFAULT NOW(),
+      atualizado_em TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS usuarios (
       id         SERIAL PRIMARY KEY,
@@ -149,6 +169,35 @@ async function initDb() {
     )
   `);
 
+  // --- Users, profiles and quota ---
+  await pool.query(
+    `ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS perfil_id INTEGER REFERENCES perfis(id) ON DELETE SET NULL`
+  ).catch(() => {});
+  // NULL = unlimited
+  await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS limite_registros INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE`).catch(() => {});
+  await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMP DEFAULT NOW()`).catch(() => {});
+
+  // Authorship — the quota counts rows created by each user
+  for (const tabela of Object.values(TABELAS_DE_REGISTRO)) {
+    await pool.query(
+      `ALTER TABLE ${tabela} ADD COLUMN IF NOT EXISTS criado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL`
+    ).catch(() => {});
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS ${tabela}_criado_por_idx ON ${tabela} (criado_por)`
+    ).catch(() => {});
+  }
+
+  // Seed the default profiles. Only inserted when missing — an operator who
+  // edits "Cartório" must not have it reset on every restart.
+  for (const perfil of PERFIS_PADRAO) {
+    await pool.query(
+      `INSERT INTO perfis (nome, descricao, is_admin, permissoes)
+       VALUES ($1, $2, $3, $4) ON CONFLICT (nome) DO NOTHING`,
+      [perfil.nome, perfil.descricao, perfil.is_admin, JSON.stringify(perfil.permissoes)]
+    );
+  }
+
   // Seed admin user
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@registrocivil.com';
   const adminPass  = process.env.ADMIN_PASSWORD || 'Admin@2024';
@@ -157,6 +206,13 @@ async function initDb() {
     `INSERT INTO usuarios (nome, email, senha_hash) VALUES ('Administrador', $1, $2) ON CONFLICT (email) DO NOTHING`,
     [adminEmail, hash]
   );
+
+  // Any user without a profile gets Administrator — this covers the upgrade
+  // from before profiles existed, where locking everyone out would be worse.
+  await pool.query(
+    `UPDATE usuarios SET perfil_id = (SELECT id FROM perfis WHERE nome = 'Administrador')
+      WHERE perfil_id IS NULL`
+  ).catch(() => {});
 }
 
-module.exports = { pool, initDb };
+module.exports = { pool, initDb, TABELAS_DE_REGISTRO };

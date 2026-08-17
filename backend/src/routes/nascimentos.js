@@ -3,6 +3,7 @@ const path    = require('path');
 const { pool } = require('../db');
 const { locateFields } = require('../utils/imageLocalize');
 const { getOllamaBase, getActiveModel } = require('../utils/runpod');
+const { exigePermissao, exigeCota } = require('../middleware/permissao');
 const router = express.Router();
 
 function addArquivoUrl(row) {
@@ -14,7 +15,7 @@ function addArquivoUrl(row) {
 }
 
 // List with search + pagination + optional livro filter
-router.get('/', async (req, res) => {
+router.get('/', exigePermissao('nascimento', 'ver'), async (req, res) => {
   try {
     const { search = '', page = 1, limit = 10, livro_id } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -54,7 +55,7 @@ router.get('/', async (req, res) => {
 });
 
 // Get one
-router.get('/:id', async (req, res) => {
+router.get('/:id', exigePermissao('nascimento', 'ver'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio
@@ -71,7 +72,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create
-router.post('/', async (req, res) => {
+router.post('/', exigePermissao('nascimento', 'criar'), exigeCota(), async (req, res) => {
   try {
     const f = req.body;
     const arquivoUrl = f.arquivo_url || (f.arquivo_path ? `/files/${path.basename(f.arquivo_path)}` : null);
@@ -79,8 +80,8 @@ router.post('/', async (req, res) => {
       `INSERT INTO registros_nascimento
         (livro_id, nome_completo, nome_mae, nome_pai, data_nascimento, ano, livro, folha,
          numero_termo, municipio, estado, confianca, observacoes, transcricao_completa,
-         arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+         arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox, criado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
@@ -91,6 +92,7 @@ router.post('/', async (req, res) => {
         f.arquivo_path, f.arquivo_nome, f.arquivo_tipo,
         arquivoUrl,
         f.campos_bbox ? JSON.stringify(f.campos_bbox) : null,
+        req.contexto.id,
       ]
     );
     res.status(201).json(addArquivoUrl(rows[0]));
@@ -101,7 +103,7 @@ router.post('/', async (req, res) => {
 });
 
 // Update
-router.put('/:id', async (req, res) => {
+router.put('/:id', exigePermissao('nascimento', 'editar'), async (req, res) => {
   try {
     const f = req.body;
     const { rows } = await pool.query(
@@ -132,7 +134,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // Delete
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', exigePermissao('nascimento', 'excluir'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       'DELETE FROM registros_nascimento WHERE id=$1 RETURNING arquivo_path', [req.params.id]
@@ -149,7 +151,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // Localize fields in image — calls AI to get bounding boxes
-router.post('/:id/localizar', async (req, res) => {
+router.post('/:id/localizar', exigePermissao('nascimento', 'editar'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT * FROM registros_nascimento WHERE id = $1', [req.params.id]

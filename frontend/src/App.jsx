@@ -15,6 +15,11 @@ import EscriturasList from './pages/escrituras/List.jsx';
 import EscriturasForm from './pages/escrituras/Form.jsx';
 import Placeholder from './pages/Placeholder.jsx';
 import Config from './pages/Config.jsx';
+import UsuariosList from './pages/usuarios/List.jsx';
+import UsuariosForm from './pages/usuarios/Form.jsx';
+import PerfisList from './pages/perfis/List.jsx';
+import PerfisForm from './pages/perfis/Form.jsx';
+import RotaPermitida from './components/RotaPermitida.jsx';
 
 export default function App() {
   return (
@@ -44,7 +49,27 @@ export default function App() {
               <Route path="escrituras-compra-venda"              element={<EscriturasList />} />
               <Route path="escrituras-compra-venda/novo"         element={<EscriturasForm />} />
               <Route path="escrituras-compra-venda/:id/editar"   element={<EscriturasForm />} />
-              <Route path="configuracoes" element={<Config />} />
+              <Route path="configuracoes" element={
+                <RotaPermitida modulo="configuracoes" acao="ver"><Config /></RotaPermitida>
+              } />
+              <Route path="configuracoes/usuarios" element={
+                <RotaPermitida modulo="usuarios" acao="ver"><UsuariosList /></RotaPermitida>
+              } />
+              <Route path="configuracoes/usuarios/novo" element={
+                <RotaPermitida modulo="usuarios" acao="criar"><UsuariosForm /></RotaPermitida>
+              } />
+              <Route path="configuracoes/usuarios/:id/editar" element={
+                <RotaPermitida modulo="usuarios" acao="editar"><UsuariosForm /></RotaPermitida>
+              } />
+              <Route path="configuracoes/perfis" element={
+                <RotaPermitida modulo="perfis" acao="ver"><PerfisList /></RotaPermitida>
+              } />
+              <Route path="configuracoes/perfis/novo" element={
+                <RotaPermitida modulo="perfis" acao="criar"><PerfisForm /></RotaPermitida>
+              } />
+              <Route path="configuracoes/perfis/:id/editar" element={
+                <RotaPermitida modulo="perfis" acao="editar"><PerfisForm /></RotaPermitida>
+              } />
             </Route>
           </Routes>
         </BrowserRouter>

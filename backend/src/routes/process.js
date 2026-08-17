@@ -8,6 +8,7 @@ const { pool } = require('../db');
 const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getOllamaBase, getActiveModel, getProvider, getExtConfig, loadConfigFromDb } = require('../utils/runpod');
 const { detectRecordCount } = require('../utils/imageSegment');
 const { parseResultFromText } = require('../utils/parseResult');
+const { temPermissao, MODULOS_COM_REGISTRO } = require('../utils/permissoes');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -440,6 +441,18 @@ router.post('/', upload, async (req, res) => {
   const primaryFile = uploadedFiles[0];
   const livroId     = req.body.livro_id || null;
   const tipo        = req.body.tipo || 'nascimento';
+
+  // Reading a document is the first half of creating a record of that type,
+  // so it is gated by the same permission. The quota is only charged when the
+  // record is actually saved.
+  if (!MODULOS_COM_REGISTRO.includes(tipo)) {
+    return res.status(400).json({ error: `Tipo de documento inválido: ${tipo}` });
+  }
+  if (!temPermissao(req.contexto?.perfil, tipo, 'criar')) {
+    return res.status(403).json({
+      error: `Seu perfil (${req.contexto?.perfil?.nome || 'sem perfil'}) não tem permissão para criar registros de ${tipo}.`,
+    });
+  }
   const isImage     = /image\/(jpeg|png|webp|tiff)/.test(primaryFile.mimetype);
   // Batch import feeds whole books, so a page may be the cover
   const detectarCapa = tipo === 'nascimento' && /^(1|true)$/i.test(String(req.body.detectar_capa || ''));
