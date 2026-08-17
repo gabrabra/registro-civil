@@ -23,7 +23,8 @@ router.get('/', async (req, res) => {
        FROM registros_escritura r
        LEFT JOIN livros l ON l.id = r.livro_id
        WHERE (r.vendedor ILIKE $1 OR r.comprador ILIKE $1 OR r.municipio ILIKE $1
-          OR r.endereco_imovel ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1)
+          OR r.endereco_imovel ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1
+          OR r.transcricao_completa ILIKE $1)
        ${livroFilter}
        ORDER BY r.criado_em DESC
        LIMIT $2 OFFSET $3`,
@@ -32,7 +33,8 @@ router.get('/', async (req, res) => {
     const count = await pool.query(
       `SELECT COUNT(*) FROM registros_escritura r
        WHERE (r.vendedor ILIKE $1 OR r.comprador ILIKE $1 OR r.municipio ILIKE $1
-          OR r.endereco_imovel ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1)
+          OR r.endereco_imovel ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1
+          OR r.transcricao_completa ILIKE $1)
        ${livroFilter}`,
       [like]
     );
@@ -72,8 +74,9 @@ router.post('/', async (req, res) => {
       `INSERT INTO registros_escritura
         (livro_id, vendedor, cpf_vendedor, comprador, cpf_comprador, data_escritura, ano,
          livro, folha, descricao_imovel, endereco_imovel, valor, tabeliao, cartorio,
-         municipio, estado, confianca, observacoes, arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox, arquivos_urls)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+         municipio, estado, confianca, observacoes, transcricao_completa,
+         arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox, arquivos_urls)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
        RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
@@ -83,6 +86,7 @@ router.post('/', async (req, res) => {
         f.livro, f.folha, f.descricao_imovel, f.endereco_imovel,
         f.valor, f.tabeliao, f.cartorio,
         f.municipio, f.estado, f.confianca, f.observacoes,
+        f.transcricao_completa || null,
         f.arquivo_path, f.arquivo_nome, f.arquivo_tipo,
         arquivoUrl,
         f.campos_bbox ? JSON.stringify(f.campos_bbox) : null,
@@ -104,8 +108,10 @@ router.put('/:id', async (req, res) => {
         livro_id=$1, vendedor=$2, cpf_vendedor=$3, comprador=$4, cpf_comprador=$5,
         data_escritura=$6, ano=$7, livro=$8, folha=$9, descricao_imovel=$10,
         endereco_imovel=$11, valor=$12, tabeliao=$13, cartorio=$14,
-        municipio=$15, estado=$16, confianca=$17, observacoes=$18, atualizado_em=NOW()
-       WHERE id=$19 RETURNING *`,
+        municipio=$15, estado=$16, confianca=$17, observacoes=$18,
+        transcricao_completa = CASE WHEN $19::boolean THEN $20::text ELSE transcricao_completa END,
+        atualizado_em=NOW()
+       WHERE id=$21 RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
         f.vendedor, f.cpf_vendedor, f.comprador, f.cpf_comprador,
@@ -114,6 +120,8 @@ router.put('/:id', async (req, res) => {
         f.livro, f.folha, f.descricao_imovel, f.endereco_imovel,
         f.valor, f.tabeliao, f.cartorio,
         f.municipio, f.estado, f.confianca, f.observacoes,
+        Object.hasOwn(f, 'transcricao_completa'),
+        f.transcricao_completa || null,
         req.params.id,
       ]
     );

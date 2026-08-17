@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Upload, Sparkles, AlertTriangle, CheckCircle, ChevronLeft, Save, Loader2, FileText, X, BookOpen, Lock } from 'lucide-react';
 import { nascimentosApi, processApi, livrosApi } from '../../api.js';
+import TranscricaoPanel from '../../components/TranscricaoPanel.jsx';
 
 const EMPTY = {
   livro_id: '', nome_completo: '', nome_mae: '', nome_pai: '', data_nascimento: '',
@@ -103,6 +104,8 @@ export default function NascimentosForm() {
   const [form,       setForm]       = useState({ ...EMPTY, livro_id: searchParams.get('livro_id') || '' });
   const [livros,     setLivros]     = useState([]);
   const [confidence, setConfidence] = useState({});
+  // Kept outside `form` so it is not swept up by the per-field confidence logic
+  const [transcricao, setTranscricao] = useState('');
   const [file,       setFile]       = useState(null);
   const [fileUrl,    setFileUrl]    = useState(null);
   const [processing, setProcessing] = useState(false);
@@ -153,6 +156,7 @@ export default function NascimentosForm() {
         estado:          r.estado          || '',
         observacoes:     r.observacoes     || ''
       });
+      setTranscricao(r.transcricao_completa || '');
       if (r.arquivo_url) setFileUrl(r.arquivo_url);
     }).catch(() => setToast({ msg: 'Erro ao carregar registro', type: 'error' }));
   }, [id]);
@@ -222,11 +226,17 @@ export default function NascimentosForm() {
         _arquivo_url:  data.arquivo_url,
       }));
       setConfidence(perField);
+      setTranscricao(data.transcricao_completa || '');
       setFileUrl(data.arquivo_url || null);
       setAiDone(true);
       setToast(data.ai_error
-        ? { msg: `IA indisponível: ${data.ai_error_detail || 'Modelos falharam'} — preencha manualmente`, type: 'error' }
-        : { msg: 'Dados extraídos! Revise e salve.', type: 'success' }
+        ? {
+            msg: data.transcricao_completa
+              ? `Página transcrita, mas os campos não foram extraídos (${data.ai_error_detail}) — preencha manualmente usando a transcrição`
+              : `IA indisponível: ${data.ai_error_detail || 'Modelos falharam'} — preencha manualmente`,
+            type: 'error'
+          }
+        : { msg: 'Página transcrita e dados extraídos! Revise e salve.', type: 'success' }
       );
     } catch (e) {
       setToast({ msg: `Erro ao processar: ${e.message}`, type: 'error' });
@@ -251,6 +261,7 @@ export default function NascimentosForm() {
     try {
       const payload = {
         ...form,
+        transcricao_completa: transcricao || null,
         arquivo_path: form._arquivo_path || null,
         arquivo_nome: form._arquivo_nome || null,
         arquivo_tipo: form._arquivo_tipo || null,
@@ -329,7 +340,7 @@ export default function NascimentosForm() {
         {!isEdit && (
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h2 className="text-sm font-semibold text-slate-700 mb-3">Documento do Registro</h2>
-            <DropZone file={file} onFile={setFile} onClear={() => { setFile(null); setAiDone(false); setConfidence({}); }} uploading={processing} />
+            <DropZone file={file} onFile={setFile} onClear={() => { setFile(null); setAiDone(false); setConfidence({}); setTranscricao(''); }} uploading={processing} />
             {file && !processing && (
               <button type="button" onClick={handleProcess}
                 className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors">
@@ -362,6 +373,11 @@ export default function NascimentosForm() {
               <FileText className="w-4 h-4" /> Abrir documento
             </a>
           </div>
+        )}
+
+        {/* Full-page transcription */}
+        {(transcricao || isEdit) && (
+          <TranscricaoPanel value={transcricao} onChange={setTranscricao} defaultOpen={!isEdit} />
         )}
 
         {/* Form Fields */}

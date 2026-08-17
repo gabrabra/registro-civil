@@ -35,35 +35,45 @@ const COVER_PROMPT =
   '  "estado": "sigla UF ex: PE ou null"\n' +
   '}';
 
-async function callModelForCoverExternal(base64) {
+// Room for the answer even on models where thinking is on by default and
+// shares this budget.
+const COVER_MAX_TOKENS = 4096;
+
+async function callModelForCoverExternal(base64, mimetype) {
   const { key, model, tipo, resolvedUrl } = getExtConfig();
   if (!key || !model) throw new Error('API externa não configurada (preencha chave e modelo nas Configurações)');
   if (!resolvedUrl) throw new Error('URL base não configurada');
+
+  const mime = mimetype || 'image/jpeg';
 
   let rawContent;
   try {
     if (tipo === 'anthropic') {
       const resp = await axios.post(`${resolvedUrl}/messages`, {
-        model, max_tokens: 512,
+        model, max_tokens: COVER_MAX_TOKENS,
         messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+          { type: 'image', source: { type: 'base64', media_type: mime, data: base64 } },
           { type: 'text', text: COVER_PROMPT }
         ]}]
       }, {
         headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-        timeout: 60000
+        timeout: 120000
       });
-      rawContent = resp.data?.content?.[0]?.text || '';
+      // Thinking blocks precede text blocks — content[0] is not reliably the answer
+      rawContent = (resp.data?.content || [])
+        .filter(b => b.type === 'text' && typeof b.text === 'string')
+        .map(b => b.text)
+        .join('\n');
     } else {
       const resp = await axios.post(`${resolvedUrl.replace(/\/$/, '')}/chat/completions`, {
-        model, max_tokens: 512,
+        model, max_tokens: COVER_MAX_TOKENS,
         messages: [{ role: 'user', content: [
           { type: 'text', text: COVER_PROMPT },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
+          { type: 'image_url', image_url: { url: `data:${mime};base64,${base64}` } }
         ]}]
       }, {
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        timeout: 60000
+        timeout: 120000
       });
       rawContent = resp.data?.choices?.[0]?.message?.content || '';
     }
@@ -127,7 +137,7 @@ router.post('/livro-capa', upload.single('file'), async (req, res) => {
   let coverData = null;
   try {
     if (provider === 'openai') {
-      coverData = await callModelForCoverExternal(base64);
+      coverData = await callModelForCoverExternal(base64, req.file.mimetype);
     } else {
       coverData = await callModelForCover(model, base64);
     }

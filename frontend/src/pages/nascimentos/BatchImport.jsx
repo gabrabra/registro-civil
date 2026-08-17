@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { livrosApi } from '../../api.js';
 import { useBatch } from '../../context/BatchContext.jsx';
+import TranscricaoPanel from '../../components/TranscricaoPanel.jsx';
 
 function StatusBadge({ status, error }) {
   if (status === 'waiting' || status === 'queued')
@@ -131,9 +132,10 @@ function EditSubCard({ reg, onApply, onCancel }) {
   );
 }
 
-function ReviewCard({ item, itemIndex, onSaveRecord, onUpdateRecord, savingKey }) {
+function ReviewCard({ item, itemIndex, onSaveRecord, onUpdateRecord, onUpdateTranscricao, savingKey }) {
   const [editingReg, setEditingReg] = useState(null);
   const registros   = item.extracted?.registros || [];
+  const transcricao = item.extracted?.transcricao_completa || '';
   const savedCount  = item.savedRecords.filter(Boolean).length;
   const allSaved    = registros.length > 0 && savedCount === registros.length;
 
@@ -143,8 +145,23 @@ function ReviewCard({ item, itemIndex, onSaveRecord, onUpdateRecord, savingKey }
         <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
           <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
           <span className="text-sm font-medium text-slate-700 truncate">{item.file.name}</span>
-          <span className="text-xs text-slate-400 ml-2">Nenhum registro encontrado</span>
+          <span className="text-xs text-slate-400 ml-2">
+            {transcricao ? 'Transcrita, mas sem registros estruturados' : 'Nenhum registro encontrado'}
+          </span>
         </div>
+        {item.error && (
+          <p className="px-4 py-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-100">{item.error}</p>
+        )}
+        {/* No structured records, but the page text is still worth keeping */}
+        {transcricao && (
+          <div className="p-3">
+            <TranscricaoPanel
+              value={transcricao}
+              onChange={text => onUpdateTranscricao(itemIndex, text)}
+              defaultOpen={false}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -187,6 +204,16 @@ function ReviewCard({ item, itemIndex, onSaveRecord, onUpdateRecord, savingKey }
           </div>
         ))}
       </div>
+
+      {transcricao && (
+        <div className="p-3 border-t border-slate-100 bg-slate-50/60">
+          <TranscricaoPanel
+            value={transcricao}
+            onChange={text => onUpdateTranscricao(itemIndex, text)}
+            defaultOpen={false}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -195,7 +222,7 @@ export default function BatchImport() {
   const navigate = useNavigate();
   const {
     items, livroId, setLivroId, isRunning,
-    addFiles, startProcessing, saveOneRecord, updateRecord, clearAll,
+    addFiles, startProcessing, saveOneRecord, updateRecord, updateTranscricao, clearAll,
     waitingCount, doneCount, unsavedCount, total,
   } = useBatch();
 
@@ -404,6 +431,7 @@ export default function BatchImport() {
                   itemIndex={i}
                   onSaveRecord={handleSaveRecord}
                   onUpdateRecord={updateRecord}
+                  onUpdateTranscricao={updateTranscricao}
                   savingKey={savingKey}
                 />
               ) : null

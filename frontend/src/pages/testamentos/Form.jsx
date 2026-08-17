@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Upload, Sparkles, AlertTriangle, CheckCircle, ChevronLeft, Save, Loader2, FileText, X, BookOpen, Plus } from 'lucide-react';
 import { testamentosApi, processApi, livrosApi } from '../../api.js';
+import TranscricaoPanel from '../../components/TranscricaoPanel.jsx';
 
 const EMPTY = {
   livro_id: '', testador: '', data_testamento: '', ano: '', livro: '', folha: '',
@@ -111,6 +112,8 @@ export default function TestamentosForm() {
   const [form,       setForm]       = useState({ ...EMPTY, livro_id: searchParams.get('livro_id') || '' });
   const [livros,     setLivros]     = useState([]);
   const [confidence, setConfidence] = useState({});
+  // Kept outside `form` so it is not swept up by the per-field confidence logic
+  const [transcricao, setTranscricao] = useState('');
   const [files,      setFiles]      = useState([]);
   const [fileUrls,   setFileUrls]   = useState([]);
   const [processing, setProcessing] = useState(false);
@@ -137,6 +140,7 @@ export default function TestamentosForm() {
         estado:          r.estado          || '',
         observacoes:     r.observacoes     || '',
       });
+      setTranscricao(r.transcricao_completa || '');
       const urls = r.arquivos_urls || (r.arquivo_url ? [r.arquivo_url] : []);
       setFileUrls(urls);
     }).catch(() => setToast({ msg: 'Erro ao carregar registro', type: 'error' }));
@@ -152,6 +156,7 @@ export default function TestamentosForm() {
     setFiles(prev => [...prev, ...newFiles]);
     setAiDone(false);
     setConfidence({});
+    setTranscricao('');
   }
 
   function removeFile(index) {
@@ -189,11 +194,17 @@ export default function TestamentosForm() {
         _arquivos_urls: data.arquivos_urls,
       }));
       setConfidence(perField);
+      setTranscricao(data.transcricao_completa || '');
       setFileUrls(data.arquivos_urls || (data.arquivo_url ? [data.arquivo_url] : []));
       setAiDone(true);
       setToast(data.ai_error
-        ? { msg: `IA indisponível: ${data.ai_error_detail || 'Modelos falharam'} — preencha manualmente`, type: 'error' }
-        : { msg: `Dados extraídos de ${files.length} página(s)! Revise e salve.`, type: 'success' }
+        ? {
+            msg: data.transcricao_completa
+              ? `Documento transcrito, mas os campos não foram extraídos (${data.ai_error_detail}) — preencha manualmente usando a transcrição`
+              : `IA indisponível: ${data.ai_error_detail || 'Modelos falharam'} — preencha manualmente`,
+            type: 'error'
+          }
+        : { msg: `${files.length} página(s) transcritas e dados extraídos! Revise e salve.`, type: 'success' }
       );
     } catch (e) {
       setToast({ msg: `Erro ao processar: ${e.message}`, type: 'error' });
@@ -216,6 +227,7 @@ export default function TestamentosForm() {
     try {
       const payload = {
         ...form,
+        transcricao_completa: transcricao || null,
         arquivo_path:  form._arquivo_path  || null,
         arquivo_nome:  form._arquivo_nome  || null,
         arquivo_tipo:  form._arquivo_tipo  || null,
@@ -323,6 +335,11 @@ export default function TestamentosForm() {
               ))}
             </div>
           </div>
+        )}
+
+        {/* Full-document transcription */}
+        {(transcricao || isEdit) && (
+          <TranscricaoPanel value={transcricao} onChange={setTranscricao} defaultOpen={!isEdit} />
         )}
 
         {/* Fields */}

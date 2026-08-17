@@ -32,14 +32,16 @@ export function BatchProvider({ children }) {
     processApi.file(item.file, livroIdRef.current || null)
       .then(data => {
         const registros = Array.isArray(data.registros) ? data.registros : [];
-        const hasAiError = data.ai_error && registros.length === 0;
+        // A page that was transcribed is still a useful result even with zero
+        // structured records — keep it reviewable instead of hiding it as an error
+        const hasAiError = data.ai_error && registros.length === 0 && !data.transcricao_completa;
         setItems(prev => prev.map((it, i) =>
           i === nextIdx ? {
             ...it,
             status: hasAiError ? 'error' : 'done',
             extracted: data,
             savedRecords: Array(registros.length).fill(false),
-            error: hasAiError
+            error: data.ai_error
               ? (data.ai_error_detail || 'IA indisponível — pods falharam')
               : null,
           } : it
@@ -93,6 +95,8 @@ export function BatchProvider({ children }) {
       estado:          reg.estado          || null,
       confianca:       reg.confianca       || null,
       observacoes:     reg.observacoes     || null,
+      // Every record on a page shares that page's transcription
+      transcricao_completa: item.extracted.transcricao_completa || null,
       arquivo_path:    item.extracted.arquivo_path || null,
       arquivo_nome:    item.extracted.arquivo_nome || null,
       arquivo_tipo:    item.extracted.arquivo_tipo || null,
@@ -115,6 +119,13 @@ export function BatchProvider({ children }) {
     }));
   }
 
+  // Lets the operator correct a page's transcription before its records are saved
+  function updateTranscricao(itemIdx, text) {
+    setItems(prev => prev.map((it, i) =>
+      i === itemIdx ? { ...it, extracted: { ...it.extracted, transcricao_completa: text } } : it
+    ));
+  }
+
   function clearAll() {
     if (isRunning) return;
     setItems([]);
@@ -132,7 +143,7 @@ export function BatchProvider({ children }) {
   return (
     <BatchCtx.Provider value={{
       items, livroId, setLivroId, isRunning,
-      addFiles, startProcessing, saveOneRecord, updateRecord, clearAll,
+      addFiles, startProcessing, saveOneRecord, updateRecord, updateTranscricao, clearAll,
       waitingCount, queuedCount, doneCount, unsavedCount,
       total: items.length,
     }}>

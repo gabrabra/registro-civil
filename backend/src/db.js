@@ -48,6 +48,7 @@ async function initDb() {
       estado          VARCHAR(20),
       confianca       VARCHAR(20),
       observacoes     TEXT,
+      transcricao_completa TEXT,
       arquivo_path    VARCHAR(1000),
       arquivo_nome    VARCHAR(500),
       arquivo_tipo    VARCHAR(100),
@@ -83,6 +84,7 @@ async function initDb() {
       estado          VARCHAR(20),
       confianca       VARCHAR(20),
       observacoes     TEXT,
+      transcricao_completa TEXT,
       arquivo_path    VARCHAR(1000),
       arquivo_nome    VARCHAR(500),
       arquivo_tipo    VARCHAR(100),
@@ -114,6 +116,7 @@ async function initDb() {
       estado           VARCHAR(20),
       confianca        VARCHAR(20),
       observacoes      TEXT,
+      transcricao_completa TEXT,
       arquivo_path     VARCHAR(1000),
       arquivo_nome     VARCHAR(500),
       arquivo_tipo     VARCHAR(100),
@@ -123,6 +126,20 @@ async function initDb() {
       atualizado_em    TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  // Full-page transcription — runs after the CREATE TABLEs above so it also
+  // covers databases created before the column existed
+  for (const t of ['registros_nascimento', 'registros_testamento', 'registros_escritura']) {
+    await pool.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS transcricao_completa TEXT`).catch(() => {});
+  }
+
+  // Trigram index makes ILIKE '%termo%' over the transcription usable as the table grows
+  await pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm`).catch(() => {});
+  for (const t of ['registros_nascimento', 'registros_testamento', 'registros_escritura']) {
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS ${t}_transcricao_trgm ON ${t} USING gin (transcricao_completa gin_trgm_ops)`
+    ).catch(() => {});
+  }
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS configuracoes (

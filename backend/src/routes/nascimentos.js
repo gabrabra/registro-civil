@@ -26,7 +26,8 @@ router.get('/', async (req, res) => {
        FROM registros_nascimento r
        LEFT JOIN livros l ON l.id = r.livro_id
        WHERE (r.nome_completo ILIKE $1 OR r.nome_mae ILIKE $1 OR r.nome_pai ILIKE $1
-          OR r.numero_termo ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1)
+          OR r.numero_termo ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1
+          OR r.transcricao_completa ILIKE $1)
        ${livroFilter}
        ORDER BY r.criado_em DESC
        LIMIT $2 OFFSET $3`,
@@ -35,7 +36,8 @@ router.get('/', async (req, res) => {
     const count = await pool.query(
       `SELECT COUNT(*) FROM registros_nascimento r
        WHERE (r.nome_completo ILIKE $1 OR r.nome_mae ILIKE $1 OR r.nome_pai ILIKE $1
-          OR r.numero_termo ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1)
+          OR r.numero_termo ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1
+          OR r.transcricao_completa ILIKE $1)
        ${livroFilter}`,
       [like]
     );
@@ -76,15 +78,16 @@ router.post('/', async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO registros_nascimento
         (livro_id, nome_completo, nome_mae, nome_pai, data_nascimento, ano, livro, folha,
-         numero_termo, municipio, estado, confianca, observacoes,
+         numero_termo, municipio, estado, confianca, observacoes, transcricao_completa,
          arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
         f.nome_completo, f.nome_mae, f.nome_pai, f.data_nascimento,
         f.ano ? parseInt(f.ano) : null, f.livro, f.folha, f.numero_termo,
         f.municipio, f.estado, f.confianca, f.observacoes,
+        f.transcricao_completa || null,
         f.arquivo_path, f.arquivo_nome, f.arquivo_tipo,
         arquivoUrl,
         f.campos_bbox ? JSON.stringify(f.campos_bbox) : null,
@@ -105,13 +108,20 @@ router.put('/:id', async (req, res) => {
       `UPDATE registros_nascimento SET
         livro_id=$1, nome_completo=$2, nome_mae=$3, nome_pai=$4, data_nascimento=$5, ano=$6,
         livro=$7, folha=$8, numero_termo=$9, municipio=$10, estado=$11,
-        confianca=$12, observacoes=$13, atualizado_em=NOW()
-       WHERE id=$14 RETURNING *`,
+        confianca=$12, observacoes=$13,
+        transcricao_completa = CASE WHEN $14::boolean THEN $15::text ELSE transcricao_completa END,
+        atualizado_em=NOW()
+       WHERE id=$16 RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
         f.nome_completo, f.nome_mae, f.nome_pai, f.data_nascimento,
         f.ano ? parseInt(f.ano) : null, f.livro, f.folha, f.numero_termo,
-        f.municipio, f.estado, f.confianca, f.observacoes, req.params.id,
+        f.municipio, f.estado, f.confianca, f.observacoes,
+        // Only touch the transcription when the client actually sent the field,
+        // so a form that omits it does not wipe the stored page text
+        Object.hasOwn(f, 'transcricao_completa'),
+        f.transcricao_completa || null,
+        req.params.id,
       ]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });

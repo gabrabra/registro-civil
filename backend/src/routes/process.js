@@ -7,6 +7,7 @@ const { v4: uuid } = require('uuid');
 const { pool } = require('../db');
 const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig, getOllamaBase, getActiveModel, getProvider, getExtConfig, loadConfigFromDb } = require('../utils/runpod');
 const { detectRecordCount } = require('../utils/imageSegment');
+const { parseResultFromText } = require('../utils/parseResult');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -27,14 +28,31 @@ const upload = multer({
   }
 }).any(); // accepts both 'file' (legacy) and 'files' (multi-page)
 
+// Every prompt asks for the same two-part answer: the full page transcribed
+// verbatim, then the structured records derived from that transcription.
+const TRANSCRICAO_INSTRUCAO =
+  'PASSO 1 — TRANSCRIÇÃO INTEGRAL: Transcreva TODO o texto visível na página, do começo ao fim, ' +
+  'linha por linha, sem resumir, sem parafrasear e sem pular trechos. Inclua cabeçalhos, margens, ' +
+  'anotações laterais, averbações, carimbos e assinaturas. Preserve a grafia original de nomes e ' +
+  'palavras (não modernize a ortografia). Marque trechos que não conseguir ler como [ilegível].\n';
+
+const FORMATO_RESPOSTA =
+  'Responda SOMENTE com um objeto JSON válido, sem texto antes ou depois, neste formato:\n\n' +
+  '{\n' +
+  '  "transcricao_completa": "todo o texto da página, usando \\\\n para quebras de linha",\n' +
+  '  "registros": [ /* ver formato de cada registro abaixo */ ]\n' +
+  '}\n\n' +
+  'Regras do JSON: use \\\\n para quebras de linha e \\\\" para aspas dentro de ' +
+  '"transcricao_completa" — nunca quebre a linha literalmente dentro de uma string.\n\n';
+
 const TESTAMENTO_PROMPT =
   'Você é especialista em leitura de documentos manuscritos históricos de cartório brasileiro.\n\n' +
   'Analise esta imagem de registro de testamento (século XIX ou XX).\n' +
   'O texto pode ser manuscrito cursivo antigo, desbotado ou parcialmente ilegível — faça seu melhor esforço.\n\n' +
-  'PASSO 1 — Leitura: Descreva brevemente o que você vê e transcreva nomes, datas e cláusulas que consegue ler.\n' +
-  'PASSO 2 — Extração: Com base no que leu, extraia os dados de cada testamento encontrado.\n\n' +
-  'Escreva o resultado como array JSON (um objeto por testamento encontrado):\n\n' +
-  '[\n' +
+  TRANSCRICAO_INSTRUCAO +
+  'PASSO 2 — EXTRAÇÃO: Com base na transcrição, extraia os dados de cada testamento encontrado.\n\n' +
+  FORMATO_RESPOSTA +
+  'Cada objeto dentro de "registros":\n\n' +
   '  {\n' +
   '    "testador": "nome completo do testador (quem fez o testamento) ou null",\n' +
   '    "data_testamento": "data no formato YYYY-MM-DD ou descrição textual ou null",\n' +
@@ -47,18 +65,17 @@ const TESTAMENTO_PROMPT =
   '    "estado": "sigla UF ex: PE ou null",\n' +
   '    "confianca": "alta | media | baixa",\n' +
   '    "observacoes": "dificuldades de leitura, informações sobre herdeiros, bens ou null"\n' +
-  '  }\n' +
-  ']\n\n' +
-  'Se não houver registros de testamento visíveis, retorne: []';
+  '  }\n\n' +
+  'Se não houver registros de testamento visíveis, use "registros": [] — mas SEMPRE preencha "transcricao_completa".';
 
 const ESCRITURA_PROMPT =
   'Você é especialista em leitura de documentos manuscritos históricos de cartório brasileiro.\n\n' +
   'Analise esta imagem de escritura de compra e venda de imóvel (século XIX ou XX).\n' +
   'O texto pode ser manuscrito cursivo antigo, desbotado ou parcialmente ilegível — faça seu melhor esforço.\n\n' +
-  'PASSO 1 — Leitura: Descreva brevemente o que você vê e transcreva nomes, valores, descrições de imóveis e datas que consegue ler.\n' +
-  'PASSO 2 — Extração: Com base no que leu, extraia os dados de cada escritura de compra e venda.\n\n' +
-  'Escreva o resultado como array JSON (um objeto por escritura encontrada):\n\n' +
-  '[\n' +
+  TRANSCRICAO_INSTRUCAO +
+  'PASSO 2 — EXTRAÇÃO: Com base na transcrição, extraia os dados de cada escritura de compra e venda.\n\n' +
+  FORMATO_RESPOSTA +
+  'Cada objeto dentro de "registros":\n\n' +
   '  {\n' +
   '    "vendedor": "nome completo do vendedor ou null",\n' +
   '    "cpf_vendedor": "CPF se visível ou null",\n' +
@@ -77,18 +94,17 @@ const ESCRITURA_PROMPT =
   '    "estado": "sigla UF ex: PE ou null",\n' +
   '    "confianca": "alta | media | baixa",\n' +
   '    "observacoes": "dificuldades de leitura ou informações adicionais ou null"\n' +
-  '  }\n' +
-  ']\n\n' +
-  'Se não houver escrituras de compra e venda visíveis, retorne: []';
+  '  }\n\n' +
+  'Se não houver escrituras de compra e venda visíveis, use "registros": [] — mas SEMPRE preencha "transcricao_completa".';
 
 const BASE_PROMPT =
   'Você é especialista em leitura de documentos manuscritos históricos de cartório brasileiro.\n\n' +
   'Analise esta imagem de página de livro de registro civil de nascimento (século XIX ou XX).\n' +
   'O texto pode ser manuscrito cursivo antigo, desbotado ou parcialmente ilegível — faça seu melhor esforço.\n\n' +
-  'PASSO 1 — Leitura: Descreva brevemente o que você vê e transcreva os nomes e datas que consegue ler.\n' +
-  'PASSO 2 — Extração: Com base no que leu, extraia os dados de cada registro de nascimento.\n\n' +
-  'Escreva o resultado como array JSON (um objeto por registro encontrado):\n\n' +
-  '[\n' +
+  TRANSCRICAO_INSTRUCAO +
+  'PASSO 2 — EXTRAÇÃO: Com base na transcrição, extraia os dados de cada registro de nascimento.\n\n' +
+  FORMATO_RESPOSTA +
+  'Cada objeto dentro de "registros":\n\n' +
   '  {\n' +
   '    "nome_completo": "nome completo do registrado ou null",\n' +
   '    "nome_mae": "nome da mãe ou null",\n' +
@@ -100,9 +116,8 @@ const BASE_PROMPT =
   '    "estado": "sigla UF ex: PE ou null",\n' +
   '    "confianca": "alta | media | baixa",\n' +
   '    "observacoes": "dificuldades de leitura ou informações adicionais ou null"\n' +
-  '  }\n' +
-  ']\n\n' +
-  'Se não houver registros de nascimento visíveis, retorne: []';
+  '  }\n\n' +
+  'Se não houver registros de nascimento visíveis, use "registros": [] — mas SEMPRE preencha "transcricao_completa".';
 
 function buildPrompt(livro, recordCountHint) {
   if (!livro && !recordCountHint) return BASE_PROMPT;
@@ -181,41 +196,59 @@ function applyBookConstraints(registros, livro) {
   });
 }
 
-function parseJsonFromText(text) {
-  const content = text.replace(/```json\n?|\n?```/g, '').trim();
-  try {
-    const arrMatch = content.match(/\[[\s\S]*\]/);
-    if (arrMatch) {
-      const parsed = JSON.parse(arrMatch[0]);
-      return Array.isArray(parsed) ? parsed : [parsed];
+
+// A full handwritten page transcribed verbatim plus the structured records
+// needs far more room than field extraction alone did. On models where thinking
+// is on by default this budget also covers the thinking tokens.
+const MAX_TOKENS = Number(process.env.AI_MAX_TOKENS) || 16000;
+
+// Claude accepts these image types; TIFF is not among them.
+const ANTHROPIC_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+// Builds one content block per uploaded file. PDFs go as `document`, images as
+// `image` with their real media_type — sending a PNG labelled as JPEG fails.
+function buildAnthropicBlocks(base64s, mimetypes) {
+  return base64s.map((data, i) => {
+    const mime = mimetypes?.[i] || 'image/jpeg';
+
+    if (mime === 'application/pdf') {
+      return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } };
     }
-    const objMatch = content.match(/\{[\s\S]*\}/);
-    if (objMatch) return [JSON.parse(objMatch[0])];
-  } catch (_) {}
-  return [];
+    if (!ANTHROPIC_IMAGE_TYPES.includes(mime)) {
+      throw new Error(`Formato "${mime}" não é aceito pela API Anthropic. Converta para JPG ou PNG antes de enviar.`);
+    }
+    return { type: 'image', source: { type: 'base64', media_type: mime, data } };
+  });
 }
 
-async function callModelAnthropic(base64s, prompt) {
+// Thinking blocks come before text blocks, so content[0] is not reliably the
+// answer — collect every text block instead.
+function extractAnthropicText(content) {
+  return (content || [])
+    .filter(b => b.type === 'text' && typeof b.text === 'string')
+    .map(b => b.text)
+    .join('\n')
+    .trim();
+}
+
+async function callModelAnthropic(base64s, prompt, mimetypes) {
   const { key, model, resolvedUrl } = getExtConfig();
   if (!key || !model) throw new Error('API Anthropic não configurada (preencha chave e modelo nas Configurações)');
 
-  const imageBlocks = base64s.map(b => ({
-    type: 'image',
-    source: { type: 'base64', media_type: 'image/jpeg', data: b }
-  }));
+  const mediaBlocks = buildAnthropicBlocks(base64s, mimetypes);
 
   let resp;
   try {
     resp = await axios.post(`${resolvedUrl}/messages`, {
       model,
-      max_tokens: 2048,
+      max_tokens: MAX_TOKENS,
       messages: [{
         role: 'user',
-        content: [...imageBlocks, { type: 'text', text: prompt }]
+        content: [...mediaBlocks, { type: 'text', text: prompt }]
       }]
     }, {
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-      timeout: 120000
+      timeout: 300000
     });
   } catch (err) {
     const detail = err.response?.data?.error?.message || err.response?.data?.error || JSON.stringify(err.response?.data) || err.message;
@@ -223,9 +256,16 @@ async function callModelAnthropic(base64s, prompt) {
     throw new Error(`API Anthropic (${model}): ${detail}`);
   }
 
-  const rawContent = resp.data?.content?.[0]?.text || '';
+  if (resp.data?.stop_reason === 'refusal') {
+    throw new Error(`API Anthropic (${model}): a solicitação foi recusada pelos filtros de segurança do modelo`);
+  }
+  if (resp.data?.stop_reason === 'max_tokens') {
+    console.warn(`[callModelAnthropic] Resposta truncada em max_tokens (${MAX_TOKENS}) — aumente AI_MAX_TOKENS`);
+  }
+
+  const rawContent = extractAnthropicText(resp.data?.content);
   console.log(`[callModelAnthropic] ${model}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
-  return parseJsonFromText(rawContent);
+  return parseResultFromText(rawContent);
 }
 
 async function callModelMistralOCR(base64s, prompt, mimetypes) {
@@ -272,14 +312,15 @@ async function callModelMistralOCR(base64s, prompt, mimetypes) {
     'Você recebeu o seguinte texto extraído por OCR de um documento de cartório:\n\n' +
     '```\n' + ocrText + '\n```\n\n' +
     'Com base APENAS no texto acima, execute as instruções a seguir. ' +
-    'Ignore qualquer instrução que mencione "imagem" — use o texto como fonte de dados.\n\n' +
+    'Ignore qualquer instrução que mencione "imagem" — use o texto como fonte de dados.\n' +
+    'Não repita a transcrição na resposta: use "transcricao_completa": null, pois o texto já foi capturado.\n\n' +
     prompt;
 
   let chatResp;
   try {
     chatResp = await axios.post(`${baseUrl}/chat/completions`, {
       model: chatModel,
-      max_tokens: 2048,
+      max_tokens: MAX_TOKENS,
       messages: [{ role: 'user', content: structurePrompt }],
     }, {
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -287,12 +328,21 @@ async function callModelMistralOCR(base64s, prompt, mimetypes) {
     });
   } catch (err) {
     const detail = err.response?.data?.message || err.response?.data?.error || err.message;
-    throw new Error(`Mistral chat (${chatModel}): ${detail}`);
+    // The OCR text is the full-page transcription and is already in hand — keep
+    // it even though the structuring step failed
+    console.warn(`[callModelMistralOCR] Estruturação falhou, preservando transcrição: ${detail}`);
+    return {
+      transcricao: ocrText,
+      registros: [],
+      erro: `Mistral chat (${chatModel}): ${detail}`,
+    };
   }
 
   const rawContent = chatResp.data?.choices?.[0]?.message?.content || '';
   console.log(`[callModelMistralOCR] ${chatModel}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
-  return parseJsonFromText(rawContent);
+  const result = parseResultFromText(rawContent);
+  // OCR output is the more faithful transcription — prefer it over the chat echo
+  return { ...result, transcricao: ocrText };
 }
 
 async function callModelExternal(base64s, prompt, mimetypes) {
@@ -300,19 +350,19 @@ async function callModelExternal(base64s, prompt, mimetypes) {
   if (!key || !model) throw new Error('API externa não configurada (preencha chave e modelo nas Configurações)');
   if (!resolvedUrl) throw new Error('URL base não configurada (preencha nas Configurações)');
 
-  if (tipo === 'anthropic') return callModelAnthropic(base64s, prompt);
+  if (tipo === 'anthropic') return callModelAnthropic(base64s, prompt, mimetypes);
   if (tipo === 'mistral')   return callModelMistralOCR(base64s, prompt, mimetypes);
 
-  const imageBlocks = base64s.map(b => ({
+  const imageBlocks = base64s.map((b, i) => ({
     type: 'image_url',
-    image_url: { url: `data:image/jpeg;base64,${b}` }
+    image_url: { url: `data:${mimetypes?.[i] || 'image/jpeg'};base64,${b}` }
   }));
 
   let resp;
   try {
     resp = await axios.post(`${resolvedUrl.replace(/\/$/, '')}/chat/completions`, {
       model,
-      max_tokens: 2048,
+      max_tokens: MAX_TOKENS,
       messages: [{
         role: 'user',
         content: [{ type: 'text', text: prompt }, ...imageBlocks]
@@ -333,7 +383,7 @@ async function callModelExternal(base64s, prompt, mimetypes) {
 
   const rawContent = resp.data?.choices?.[0]?.message?.content || '';
   console.log(`[callModelExt] ${model}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
-  return parseJsonFromText(rawContent);
+  return parseResultFromText(rawContent);
 }
 
 async function callModel(modelName, base64s, prompt) {
@@ -343,16 +393,16 @@ async function callModel(modelName, base64s, prompt) {
       model: modelName,
       stream: false,
       keep_alive: -1,
-      options: { temperature: 0.2, num_predict: 2048 },
+      options: { temperature: 0.2, num_predict: MAX_TOKENS },
       messages: [{ role: 'user', content: prompt, images: base64s }]
-    }, { timeout: 300000 });
+    }, { timeout: 600000 });
   } catch (err) {
     throw new Error(`${modelName}: ${err.message}`);
   }
 
   const rawContent = resp.data?.message?.content || '';
   console.log(`[callModel] ${modelName}: ${rawContent.length} chars — "${rawContent.slice(0, 200).replace(/\n/g, '\\n')}"`);
-  return parseJsonFromText(rawContent);
+  return parseResultFromText(rawContent);
 }
 
 router.post('/', upload, async (req, res) => {
@@ -382,6 +432,7 @@ router.post('/', upload, async (req, res) => {
   };
 
   let allRegistros = [];
+  let transcricao  = null;
   let podError     = null;
 
   const base64s  = uploadedFiles.map(f => fs.readFileSync(f.path).toString('base64'));
@@ -394,14 +445,19 @@ router.post('/', upload, async (req, res) => {
   else prompt = buildPrompt(livro, null); // nascimento — count hint added below
 
   if (uploadedFiles.length > 1 && tipo !== 'nascimento') {
-    prompt = `Este documento tem ${uploadedFiles.length} páginas. Analise TODAS as páginas em sequência como partes de UM ÚNICO DOCUMENTO e retorne apenas UM registro JSON consolidado com os dados completos.\n\n` + prompt;
+    prompt = `Este documento tem ${uploadedFiles.length} páginas. Analise TODAS as páginas em sequência como partes de UM ÚNICO DOCUMENTO.\n` +
+      `Em "transcricao_completa", transcreva as ${uploadedFiles.length} páginas na ordem, separando cada uma com uma linha "--- Página N ---".\n` +
+      `Em "registros", retorne apenas UM objeto consolidado com os dados completos do documento.\n\n` + prompt;
   }
 
   if (provider === 'openai') {
     console.log(`[process] API externa: ${getExtConfig().model}`);
     try {
-      allRegistros = await callModelExternal(base64s, prompt, mimetypes);
-      console.log(`[process] API externa: ${allRegistros.length} registro(s)`);
+      const result = await callModelExternal(base64s, prompt, mimetypes);
+      allRegistros = result.registros;
+      transcricao  = result.transcricao;
+      if (result.erro) podError = result.erro;
+      console.log(`[process] API externa: ${allRegistros.length} registro(s), transcrição ${transcricao?.length || 0} chars`);
     } catch (e) {
       console.warn('[process] API externa falhou:', e.message);
       podError = e.message;
@@ -426,18 +482,20 @@ router.post('/', upload, async (req, res) => {
     }
 
     try {
-      const records = await callModel(model, base64s, finalPrompt);
-      console.log(`[process] ${model}: ${records.length} registro(s)`);
-      allRegistros = records;
+      const result = await callModel(model, base64s, finalPrompt);
+      console.log(`[process] ${model}: ${result.registros.length} registro(s), transcrição ${result.transcricao?.length || 0} chars`);
+      allRegistros = result.registros;
+      transcricao  = result.transcricao;
     } catch (e) {
       console.warn(`[process] ${model} falhou:`, e.message);
       const fallback = 'qwen2.5vl:7b';
       if (model !== fallback) {
         console.log(`[process] Tentando modelo padrão como fallback: ${fallback}`);
         try {
-          const records = await callModel(fallback, base64s, finalPrompt);
-          console.log(`[process] ${fallback} (fallback): ${records.length} registro(s)`);
-          allRegistros = records;
+          const result = await callModel(fallback, base64s, finalPrompt);
+          console.log(`[process] ${fallback} (fallback): ${result.registros.length} registro(s)`);
+          allRegistros = result.registros;
+          transcricao  = result.transcricao;
           podError = `Modelo "${model}" indisponível — processado com "${fallback}"`;
         } catch (e2) {
           console.warn(`[process] ${fallback} também falhou:`, e2.message);
@@ -451,14 +509,19 @@ router.post('/', upload, async (req, res) => {
 
   // Apply book constraints only for nascimentos
   const registros = tipo === 'nascimento' ? applyBookConstraints(allRegistros, livro) : allRegistros;
-  console.log(`[process] Resultado final: ${registros.length} registro(s)`);
+  console.log(`[process] Resultado final: ${registros.length} registro(s), transcrição ${transcricao?.length || 0} chars`);
 
-  const allFailed = registros.length === 0;
+  const noRecords = registros.length === 0;
   scheduleIdleStop();
   res.json({
     registros,
+    transcricao_completa: transcricao || null,
     ...arquivoInfo,
-    ...(allFailed ? { ai_error: true, ai_error_detail: podError || 'Nenhum registro extraído' } : {}),
+    ...(noRecords ? {
+      ai_error: true,
+      ai_error_detail: podError
+        || (transcricao ? 'Página transcrita, mas nenhum registro estruturado foi extraído' : 'Nenhum registro extraído'),
+    } : {}),
   });
 });
 

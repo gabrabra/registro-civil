@@ -88,7 +88,7 @@ export default function Config() {
 
   const MODELOS_POR_TIPO = {
     openai:    ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
-    anthropic: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
+    anthropic: ['claude-opus-5', 'claude-sonnet-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     deepseek:  ['deepseek-chat', 'deepseek-reasoner', 'deepseek-vl2'],
     mistral:   ['mistral-small-latest', 'mistral-large-latest', 'open-mistral-nemo'],
     generico:  [],

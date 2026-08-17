@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
        FROM registros_testamento r
        LEFT JOIN livros l ON l.id = r.livro_id
        WHERE (r.testador ILIKE $1 OR r.tabeliao ILIKE $1 OR r.municipio ILIKE $1
-          OR CAST(r.ano AS TEXT) ILIKE $1)
+          OR CAST(r.ano AS TEXT) ILIKE $1 OR r.transcricao_completa ILIKE $1)
        ${livroFilter}
        ORDER BY r.criado_em DESC
        LIMIT $2 OFFSET $3`,
@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
     const count = await pool.query(
       `SELECT COUNT(*) FROM registros_testamento r
        WHERE (r.testador ILIKE $1 OR r.tabeliao ILIKE $1 OR r.municipio ILIKE $1
-          OR CAST(r.ano AS TEXT) ILIKE $1)
+          OR CAST(r.ano AS TEXT) ILIKE $1 OR r.transcricao_completa ILIKE $1)
        ${livroFilter}`,
       [like]
     );
@@ -72,8 +72,9 @@ router.post('/', async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO registros_testamento
         (livro_id, testador, data_testamento, ano, livro, folha, tabeliao, testemunhas,
-         municipio, estado, confianca, observacoes, arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox, arquivos_urls)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+         municipio, estado, confianca, observacoes, transcricao_completa,
+         arquivo_path, arquivo_nome, arquivo_tipo, arquivo_url, campos_bbox, arquivos_urls)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
@@ -81,6 +82,7 @@ router.post('/', async (req, res) => {
         f.ano ? parseInt(f.ano) : null,
         f.livro, f.folha, f.tabeliao, f.testemunhas,
         f.municipio, f.estado, f.confianca, f.observacoes,
+        f.transcricao_completa || null,
         f.arquivo_path, f.arquivo_nome, f.arquivo_tipo,
         arquivoUrl,
         f.campos_bbox ? JSON.stringify(f.campos_bbox) : null,
@@ -101,14 +103,18 @@ router.put('/:id', async (req, res) => {
       `UPDATE registros_testamento SET
         livro_id=$1, testador=$2, data_testamento=$3, ano=$4, livro=$5, folha=$6,
         tabeliao=$7, testemunhas=$8, municipio=$9, estado=$10,
-        confianca=$11, observacoes=$12, atualizado_em=NOW()
-       WHERE id=$13 RETURNING *`,
+        confianca=$11, observacoes=$12,
+        transcricao_completa = CASE WHEN $13::boolean THEN $14::text ELSE transcricao_completa END,
+        atualizado_em=NOW()
+       WHERE id=$15 RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
         f.testador, f.data_testamento,
         f.ano ? parseInt(f.ano) : null,
         f.livro, f.folha, f.tabeliao, f.testemunhas,
         f.municipio, f.estado, f.confianca, f.observacoes,
+        Object.hasOwn(f, 'transcricao_completa'),
+        f.transcricao_completa || null,
         req.params.id,
       ]
     );
