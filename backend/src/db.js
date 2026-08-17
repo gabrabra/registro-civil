@@ -34,6 +34,31 @@ async function initDb() {
     )
   `);
 
+  // Audit trail. usuario_id is ON DELETE SET NULL but the name/email are
+  // snapshotted, so removing a user never erases what they did.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auditoria (
+      id            BIGSERIAL PRIMARY KEY,
+      usuario_id    INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+      usuario_nome  VARCHAR(200),
+      usuario_email VARCHAR(200),
+      acao          VARCHAR(40) NOT NULL,
+      modulo        VARCHAR(40),
+      registro_id   INTEGER,
+      descricao     TEXT,
+      detalhes      JSONB,
+      sucesso       BOOLEAN NOT NULL DEFAULT TRUE,
+      ip            VARCHAR(60),
+      user_agent    VARCHAR(300),
+      criado_em     TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  // The log is read newest-first and filtered by user/action/module
+  await pool.query(`CREATE INDEX IF NOT EXISTS auditoria_criado_em_idx ON auditoria (criado_em DESC)`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS auditoria_usuario_idx ON auditoria (usuario_id, criado_em DESC)`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS auditoria_acao_idx ON auditoria (acao, criado_em DESC)`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS auditoria_modulo_idx ON auditoria (modulo, criado_em DESC)`).catch(() => {});
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS livros (
       id           SERIAL PRIMARY KEY,

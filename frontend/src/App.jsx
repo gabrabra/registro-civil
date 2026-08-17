@@ -19,6 +19,7 @@ import UsuariosList from './pages/usuarios/List.jsx';
 import UsuariosForm from './pages/usuarios/Form.jsx';
 import PerfisList from './pages/perfis/List.jsx';
 import PerfisForm from './pages/perfis/Form.jsx';
+import AuditoriaList from './pages/auditoria/List.jsx';
 import RotaPermitida from './components/RotaPermitida.jsx';
 
 export default function App() {
@@ -69,6 +70,9 @@ export default function App() {
               } />
               <Route path="configuracoes/perfis/:id/editar" element={
                 <RotaPermitida modulo="perfis" acao="editar"><PerfisForm /></RotaPermitida>
+              } />
+              <Route path="configuracoes/atividades" element={
+                <RotaPermitida modulo="auditoria" acao="ver"><AuditoriaList /></RotaPermitida>
               } />
             </Route>
           </Routes>

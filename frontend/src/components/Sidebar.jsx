@@ -34,9 +34,10 @@ const sections = [
     label: 'Configurações',
     icon: Settings,
     items: [
-      { to: '/configuracoes',         label: 'Geral e IA',      modulo: 'configuracoes' },
-      { to: '/configuracoes/usuarios', label: 'Usuários',        modulo: 'usuarios' },
-      { to: '/configuracoes/perfis',   label: 'Perfis de Acesso', modulo: 'perfis' },
+      { to: '/configuracoes',           label: 'Geral e IA',         modulo: 'configuracoes' },
+      { to: '/configuracoes/usuarios',  label: 'Usuários',           modulo: 'usuarios' },
+      { to: '/configuracoes/perfis',    label: 'Perfis de Acesso',   modulo: 'perfis' },
+      { to: '/configuracoes/atividades', label: 'Registro de Atividades', modulo: 'auditoria' },
     ]
   },
 ];
@@ -118,7 +119,7 @@ function PodWidget() {
 }
 
 export default function Sidebar() {
-  const { pode, user, cota } = useAuth();
+  const { pode, user, cota, isAdmin } = useAuth();
   const [open, setOpen] = useState({
     Acervo: true, 'Registro Civil': true, 'Registro de Imóveis': true, 'Configurações': false,
   });
@@ -197,7 +198,8 @@ export default function Sidebar() {
         </div>
       )}
 
-      <PodWidget />
+      {/* Ligar e desligar o pod custa dinheiro e afeta todo mundo — só admin */}
+      {isAdmin && <PodWidget />}
 
       <div className="px-4 py-2 border-t border-white/10">
         <p className="text-xs text-slate-500">IA Indexação v1.1</p>

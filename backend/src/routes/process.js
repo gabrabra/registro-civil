@@ -9,6 +9,7 @@ const { ensurePodRunning, stopPod, scheduleIdleStop, getPodStatus, getPodConfig,
 const { detectRecordCount } = require('../utils/imageSegment');
 const { parseResultFromText } = require('../utils/parseResult');
 const { temPermissao, MODULOS_COM_REGISTRO } = require('../utils/permissoes');
+const { registrar } = require('../utils/auditoria');
 const router  = express.Router();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
@@ -565,6 +566,39 @@ router.post('/', upload, async (req, res) => {
   // A cover legitimately carries no records — it must not be reported as a failure
   const noRecords = registros.length === 0 && !ehCapa;
   if (ehCapa) console.log(`[process] Página identificada como CAPA — livro "${dadosLivro?.numero || '?'}"`);
+
+  // The AI read is the expensive step and the one that fails in ways worth
+  // reviewing later, so both outcomes go to the audit trail.
+  const baseLog = {
+    modulo: tipo,
+    detalhes: {
+      arquivos: uploadedFiles.map(f => f.originalname),
+      paginas: uploadedFiles.length,
+      provedor: provider === 'openai' ? getExtConfig().tipo : 'ollama',
+      modelo: provider === 'openai' ? getExtConfig().model : model,
+      registros_extraidos: registros.length,
+      transcricao_chars: transcricao?.length || 0,
+      eh_capa: ehCapa,
+    },
+  };
+
+  if (podError) {
+    registrar(req, {
+      ...baseLog,
+      acao: 'erro_ia',
+      sucesso: false,
+      descricao: `Falha ao ler ${primaryFile.originalname}: ${podError}`,
+      detalhes: { ...baseLog.detalhes, erro: podError },
+    });
+  } else {
+    registrar(req, {
+      ...baseLog,
+      acao: 'processar_ia',
+      descricao: ehCapa
+        ? `Leu capa de livro em ${primaryFile.originalname}`
+        : `Leu ${primaryFile.originalname}: ${registros.length} registro(s), ${transcricao?.length || 0} caracteres transcritos`,
+    });
+  }
 
   scheduleIdleStop();
   res.json({

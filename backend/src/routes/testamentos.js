@@ -1,6 +1,7 @@
 const express = require('express');
 const path    = require('path');
 const { pool } = require('../db');
+const { registrar } = require('../utils/auditoria');
 const { exigePermissao, exigeCota } = require('../middleware/permissao');
 const router  = express.Router();
 
@@ -91,6 +92,8 @@ router.post('/', exigePermissao('testamento', 'criar'), exigeCota(), async (req,
         req.contexto.id,
       ]
     );
+    registrar(req, { acao: 'criar', modulo: 'testamento', registro_id: rows[0].id,
+      descricao: `Criou testamento` + (rows[0].testador ? `: ${rows[0].testador}` : '') });
     res.status(201).json(addArquivoUrl(rows[0]));
   } catch (e) {
     console.error(e);
@@ -121,6 +124,8 @@ router.put('/:id', exigePermissao('testamento', 'editar'), async (req, res) => {
       ]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    registrar(req, { acao: 'editar', modulo: 'testamento', registro_id: rows[0].id,
+      descricao: `Editou testamento` + (rows[0].testador ? `: ${rows[0].testador}` : '') });
     res.json(addArquivoUrl(rows[0]));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -130,12 +135,14 @@ router.put('/:id', exigePermissao('testamento', 'editar'), async (req, res) => {
 router.delete('/:id', exigePermissao('testamento', 'excluir'), async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'DELETE FROM registros_testamento WHERE id=$1 RETURNING arquivo_path', [req.params.id]
+      'DELETE FROM registros_testamento WHERE id=$1 RETURNING arquivo_path, testador', [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     if (rows[0].arquivo_path) {
       try { require('fs').unlinkSync(rows[0].arquivo_path); } catch (_) {}
     }
+    registrar(req, { acao: 'excluir', modulo: 'testamento', registro_id: Number(req.params.id),
+      descricao: `Excluiu testamento` + (rows[0].testador ? `: ${rows[0].testador}` : '') });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

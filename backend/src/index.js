@@ -15,8 +15,12 @@ const processLivroRouter = require('./routes/process-livro');
 const configRouter       = require('./routes/config');
 const usuariosRouter     = require('./routes/usuarios');
 const perfisRouter       = require('./routes/perfis');
+const auditoriaRouter    = require('./routes/auditoria');
 
 const app = express();
+// Atrás do nginx, o IP real vem em x-forwarded-for — sem isto a auditoria
+// registraria sempre o IP do container do frontend.
+app.set('trust proxy', true);
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
@@ -35,6 +39,7 @@ app.use('/api/testamentos', ...protegida, testamentosRouter);
 app.use('/api/escrituras',  ...protegida, escriturasRouter);
 app.use('/api/usuarios',    ...protegida, usuariosRouter);
 app.use('/api/perfis',      ...protegida, perfisRouter);
+app.use('/api/auditoria',   ...protegida, auditoriaRouter);
 
 // Processar um documento é o mesmo que criar um registro daquele tipo, então
 // o guarda usa o tipo enviado no corpo da requisição.

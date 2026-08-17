@@ -11,6 +11,7 @@ const MODULOS = [
   { id: 'escritura',     label: 'Compra e Venda',     grupo: 'Registro de Imóveis' },
   { id: 'usuarios',      label: 'Usuários',           grupo: 'Administração' },
   { id: 'perfis',        label: 'Perfis de Acesso',   grupo: 'Administração' },
+  { id: 'auditoria',     label: 'Registro de Atividades', grupo: 'Administração' },
   { id: 'configuracoes', label: 'Configurações',      grupo: 'Administração' },
 ];
 

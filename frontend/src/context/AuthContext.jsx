@@ -25,7 +25,18 @@ export function AuthProvider({ children }) {
     setUser(userData);
   }
 
-  function logout() {
+  async function logout() {
+    // Record the event before dropping the token — the request needs it
+    try {
+      const token = localStorage.getItem('rc_token') || sessionStorage.getItem('rc_token');
+      if (token) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch { /* sair nunca pode falhar por causa do log */ }
+
     localStorage.removeItem('rc_token');
     sessionStorage.removeItem('rc_token');
     setUser(null);

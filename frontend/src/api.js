@@ -25,8 +25,16 @@ http.interceptors.response.use(
 );
 
 export const authApi = {
-  login: (email, senha) => http.post('/auth/login', { email, senha }).then(r => r.data),
-  me:    ()             => http.get('/auth/me').then(r => r.data),
+  login:  (email, senha) => http.post('/auth/login', { email, senha }).then(r => r.data),
+  me:     ()             => http.get('/auth/me').then(r => r.data),
+  // Best-effort: the token is dropped client-side regardless, this records the event
+  logout: ()             => http.post('/auth/logout').then(r => r.data).catch(() => null),
+};
+
+export const auditoriaApi = {
+  list:     (params) => http.get('/auditoria', { params }).then(r => r.data),
+  resumo:   (dias)   => http.get('/auditoria/resumo', { params: { dias } }).then(r => r.data),
+  catalogo: ()       => http.get('/auditoria/catalogo').then(r => r.data),
 };
 
 export const usuariosApi = {

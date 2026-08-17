@@ -1,5 +1,6 @@
 const { pool, TABELAS_DE_REGISTRO } = require('../db');
 const { temPermissao, normalizarPermissoes } = require('../utils/permissoes');
+const { registrar } = require('../utils/auditoria');
 
 // The JWT carries only the user id — profile and quota are read fresh on every
 // request so revoking access takes effect immediately instead of when the
@@ -52,6 +53,16 @@ function exigePermissao(modulo, acao) {
     if (temPermissao(req.contexto.perfil, modulo, acao)) return next();
 
     const nome = req.contexto.perfil?.nome || 'sem perfil';
+    // Denials are worth recording — they show misconfigured profiles and
+    // attempts to reach areas a user shouldn't
+    registrar(req, {
+      acao: 'permissao_negada',
+      modulo,
+      sucesso: false,
+      descricao: `Tentou ${acao} em ${modulo}`,
+      detalhes: { acao_tentada: acao, perfil: nome, rota: req.originalUrl, metodo: req.method },
+    });
+
     return res.status(403).json({
       error: `Seu perfil (${nome}) não tem permissão para ${acao} em ${modulo}.`,
       modulo,
@@ -83,6 +94,12 @@ function exigeCota() {
     try {
       const usados = await contarRegistrosDoUsuario(ctx.id);
       if (usados >= limite) {
+        registrar(req, {
+          acao: 'cota_atingida',
+          sucesso: false,
+          descricao: `Bloqueado ao tentar criar: ${usados} de ${limite} registros usados`,
+          detalhes: { usados, limite, rota: req.originalUrl },
+        });
         return res.status(403).json({
           error: `Limite de registros atingido (${usados} de ${limite}). Peça a um administrador para aumentar seu limite.`,
           limite,

@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
+const { registrar } = require('../utils/auditoria');
 const { exigePermissao } = require('../middleware/permissao');
 const router = express.Router();
 
@@ -48,6 +49,8 @@ router.post('/', exigePermissao('livros', 'criar'), async (req, res) => {
        f.municipio || null, f.estado || null, f.descricao || null,
        f.arquivo_capa_path || null, f.arquivo_capa_nome || null, f.arquivo_capa_url || null]
     );
+    registrar(req, { acao: 'criar', modulo: 'livros', registro_id: rows[0].id,
+      descricao: `Criou livro` + (rows[0].numero ? `: ${rows[0].numero}` : '') });
     res.status(201).json(rows[0]);
   } catch (e) {
     res.status(500).json({ error: e.message });
