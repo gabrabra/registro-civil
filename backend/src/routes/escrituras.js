@@ -2,7 +2,7 @@ const express = require('express');
 const path    = require('path');
 const { pool } = require('../db');
 const { registrar } = require('../utils/auditoria');
-const { exigePermissao, exigeCota } = require('../middleware/permissao');
+const { exigePermissao, exigeCota, filtroDono } = require('../middleware/permissao');
 const router  = express.Router();
 
 function addArquivoUrl(row) {
@@ -19,15 +19,19 @@ router.get('/', exigePermissao('escritura', 'ver'), async (req, res) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const like = `%${search}%`;
     const livroFilter = livro_id ? `AND r.livro_id = ${parseInt(livro_id)}` : '';
+    const donoFilter  = filtroDono(req.contexto, 'r');
 
     const { rows } = await pool.query(
-      `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio
+      `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio,
+              u.nome AS criado_por_nome
        FROM registros_escritura r
        LEFT JOIN livros l ON l.id = r.livro_id
+       LEFT JOIN usuarios u ON u.id = r.criado_por
        WHERE (r.vendedor ILIKE $1 OR r.comprador ILIKE $1 OR r.municipio ILIKE $1
           OR r.endereco_imovel ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1
           OR r.transcricao_completa ILIKE $1)
        ${livroFilter}
+       ${donoFilter}
        ORDER BY r.criado_em DESC
        LIMIT $2 OFFSET $3`,
       [like, parseInt(limit), offset]
@@ -37,7 +41,8 @@ router.get('/', exigePermissao('escritura', 'ver'), async (req, res) => {
        WHERE (r.vendedor ILIKE $1 OR r.comprador ILIKE $1 OR r.municipio ILIKE $1
           OR r.endereco_imovel ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1
           OR r.transcricao_completa ILIKE $1)
-       ${livroFilter}`,
+       ${livroFilter}
+       ${donoFilter}`,
       [like]
     );
     res.json({
@@ -55,10 +60,12 @@ router.get('/', exigePermissao('escritura', 'ver'), async (req, res) => {
 router.get('/:id', exigePermissao('escritura', 'ver'), async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio
+      `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio,
+              u.nome AS criado_por_nome
        FROM registros_escritura r
        LEFT JOIN livros l ON l.id = r.livro_id
-       WHERE r.id = $1`,
+       LEFT JOIN usuarios u ON u.id = r.criado_por
+       WHERE r.id = $1 ${filtroDono(req.contexto, 'r')}`,
       [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
@@ -116,7 +123,7 @@ router.put('/:id', exigePermissao('escritura', 'editar'), async (req, res) => {
         municipio=$15, estado=$16, confianca=$17, observacoes=$18,
         transcricao_completa = CASE WHEN $19::boolean THEN $20::text ELSE transcricao_completa END,
         atualizado_em=NOW()
-       WHERE id=$21 RETURNING *`,
+       WHERE id=$21 ${filtroDono(req.contexto)} RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
         f.vendedor, f.cpf_vendedor, f.comprador, f.cpf_comprador,
@@ -142,7 +149,8 @@ router.put('/:id', exigePermissao('escritura', 'editar'), async (req, res) => {
 router.delete('/:id', exigePermissao('escritura', 'excluir'), async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'DELETE FROM registros_escritura WHERE id=$1 RETURNING arquivo_path, vendedor', [req.params.id]
+      `DELETE FROM registros_escritura WHERE id=$1 ${filtroDono(req.contexto)} RETURNING arquivo_path, vendedor`,
+      [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     if (rows[0].arquivo_path) {

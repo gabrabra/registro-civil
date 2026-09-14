@@ -1,22 +1,28 @@
 const express = require('express');
 const { pool } = require('../db');
 const { registrar } = require('../utils/auditoria');
-const { exigePermissao } = require('../middleware/permissao');
+const { exigePermissao, filtroDono } = require('../middleware/permissao');
 const router = express.Router();
 
-const SELECT = `
+// The scanned-record count is joined in, so it must follow the same visibility
+// rule as the records themselves: a non-admin only counts the ones they created.
+// The owner clause goes in the JOIN's ON so books with no visible records still
+// list, with count 0.
+const selectLivros = (donoJoin) => `
   SELECT l.*,
     COUNT(r.id)::integer AS total_digitalizados,
     CASE WHEN l.termo_fim IS NOT NULL AND l.termo_inicio IS NOT NULL
          THEN (l.termo_fim - l.termo_inicio + 1) ELSE NULL END AS total_esperado
   FROM livros l
-  LEFT JOIN registros_nascimento r ON r.livro_id = l.id
+  LEFT JOIN registros_nascimento r ON r.livro_id = l.id ${donoJoin}
 `;
 
 // List all
-router.get('/', exigePermissao('livros', 'ver'), async (_req, res) => {
+router.get('/', exigePermissao('livros', 'ver'), async (req, res) => {
   try {
-    const { rows } = await pool.query(`${SELECT} GROUP BY l.id ORDER BY l.estado, l.municipio, l.numero`);
+    const { rows } = await pool.query(
+      `${selectLivros(filtroDono(req.contexto, 'r'))} GROUP BY l.id ORDER BY l.estado, l.municipio, l.numero`
+    );
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -26,7 +32,10 @@ router.get('/', exigePermissao('livros', 'ver'), async (_req, res) => {
 // Get one
 router.get('/:id', exigePermissao('livros', 'ver'), async (req, res) => {
   try {
-    const { rows } = await pool.query(`${SELECT} WHERE l.id = $1 GROUP BY l.id`, [req.params.id]);
+    const { rows } = await pool.query(
+      `${selectLivros(filtroDono(req.contexto, 'r'))} WHERE l.id = $1 GROUP BY l.id`,
+      [req.params.id]
+    );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);
   } catch (e) {

@@ -71,6 +71,19 @@ function exigePermissao(modulo, acao) {
   };
 }
 
+// SQL fragment that limits a record query to the rows a user may see.
+// Admins get '' (no restriction); everyone else is limited to rows they created,
+// which also hides legacy rows where criado_por is NULL. The id comes from the
+// database as an integer, so interpolating it is safe and matches the existing
+// livro_id filter style in the record routes. Pass the table alias used in the
+// query ('r' in every record route); omit it for UPDATE/DELETE, which have none.
+function filtroDono(contexto, alias) {
+  if (contexto?.perfil?.is_admin) return '';
+  const coluna = alias ? `${alias}.criado_por` : 'criado_por';
+  const id = Number.parseInt(contexto?.id, 10);
+  return `AND ${coluna} = ${Number.isInteger(id) ? id : -1}`;
+}
+
 // How many records this user has created across every record table
 async function contarRegistrosDoUsuario(userId) {
   const partes = Object.values(TABELAS_DE_REGISTRO)
@@ -113,4 +126,4 @@ function exigeCota() {
   };
 }
 
-module.exports = { comContexto, exigePermissao, exigeCota, carregarContexto, contarRegistrosDoUsuario };
+module.exports = { comContexto, exigePermissao, exigeCota, filtroDono, carregarContexto, contarRegistrosDoUsuario };

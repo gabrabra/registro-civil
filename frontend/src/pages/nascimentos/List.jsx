@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Upload, Eye, Pencil, Trash2, FolderOpen, ChevronLeft, ChevronRight, X, BookOpen, ArrowLeft, ScanSearch, Loader2 } from 'lucide-react';
 import { nascimentosApi } from '../../api.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 import ImageViewer from '../../components/ImageViewer.jsx';
 import { useBulkSelection } from '../../components/useBulkSelection.js';
 import { BulkBar, SelectAllCheckbox, RowCheckbox } from '../../components/BulkBar.jsx';
@@ -48,7 +49,7 @@ function FileModal({ record, onClose }) {
   );
 }
 
-function ViewModal({ record: initialRecord, onClose }) {
+function ViewModal({ record: initialRecord, onClose, isAdmin }) {
   const [record,     setRecord]     = useState(initialRecord);
   const [localizing, setLocalizing] = useState(false);
   const [locError,   setLocError]   = useState(null);
@@ -159,6 +160,13 @@ function ViewModal({ record: initialRecord, onClose }) {
                   <ConfidenceBadge value={record.confianca} />
                 </div>
               )}
+
+              {isAdmin && (
+                <div className="col-span-2">
+                  <p className="text-xs text-slate-400 mb-0.5">Criado por</p>
+                  <p className="text-sm text-slate-600">{record.criado_por_nome || '—'}</p>
+                </div>
+              )}
             </div>
 
             {/* PDF fallback */}
@@ -184,6 +192,7 @@ function ViewModal({ record: initialRecord, onClose }) {
 
 export default function NascimentosList() {
   const navigate      = useNavigate();
+  const { isAdmin }   = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const livroId       = searchParams.get('livro_id');
   const livroNome     = searchParams.get('livro_nome');
@@ -249,7 +258,7 @@ export default function NascimentosList() {
   return (
     <div className="max-w-7xl mx-auto">
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-      {viewRecord && <ViewModal record={viewRecord} onClose={() => setViewRecord(null)} />}
+      {viewRecord && <ViewModal record={viewRecord} onClose={() => setViewRecord(null)} isAdmin={isAdmin} />}
       {fileRecord && <FileModal record={fileRecord} onClose={() => setFileRecord(null)} />}
 
       {/* Breadcrumb livro */}
@@ -344,16 +353,17 @@ export default function NascimentosList() {
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-20">Folha</th>
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-20">Ano</th>
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-32">Termo</th>
+                {isAdmin && <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-40">Usuário</th>}
                 <th className="text-right px-5 py-3.5 font-semibold text-slate-600 w-36">Ações</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={7} className="text-center py-12 text-slate-400">Carregando...</td></tr>
+                <tr><td colSpan={isAdmin ? 8 : 7} className="text-center py-12 text-slate-400">Carregando...</td></tr>
               )}
               {!loading && records.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="text-center py-12">
+                  <td colSpan={isAdmin ? 8 : 7} className="text-center py-12">
                     <p className="text-slate-400 text-sm">Nenhum registro encontrado</p>
                     {search && <p className="text-slate-400 text-xs mt-1">Tente outro termo de busca</p>}
                     {!search && livroId && (
@@ -382,6 +392,11 @@ export default function NascimentosList() {
                   <td className="px-4 py-3.5 text-slate-600">{r.folha || '—'}</td>
                   <td className="px-4 py-3.5 text-slate-600">{r.ano || '—'}</td>
                   <td className="px-4 py-3.5 text-slate-600">{r.numero_termo || '—'}</td>
+                  {isAdmin && (
+                    <td className="px-4 py-3.5 text-slate-600">
+                      {r.criado_por_nome || <span className="text-slate-400 italic">—</span>}
+                    </td>
+                  )}
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-end gap-1.5">
                       {r.arquivo_url && (

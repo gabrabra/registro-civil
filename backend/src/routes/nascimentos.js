@@ -4,7 +4,7 @@ const { pool } = require('../db');
 const { locateFields } = require('../utils/imageLocalize');
 const { getOllamaBase, getActiveModel } = require('../utils/runpod');
 const { registrar } = require('../utils/auditoria');
-const { exigePermissao, exigeCota } = require('../middleware/permissao');
+const { exigePermissao, exigeCota, filtroDono } = require('../middleware/permissao');
 const router = express.Router();
 
 function addArquivoUrl(row) {
@@ -22,15 +22,19 @@ router.get('/', exigePermissao('nascimento', 'ver'), async (req, res) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const like = `%${search}%`;
     const livroFilter = livro_id ? `AND r.livro_id = ${parseInt(livro_id)}` : '';
+    const donoFilter  = filtroDono(req.contexto, 'r');
 
     const { rows } = await pool.query(
-      `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio
+      `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio,
+              u.nome AS criado_por_nome
        FROM registros_nascimento r
        LEFT JOIN livros l ON l.id = r.livro_id
+       LEFT JOIN usuarios u ON u.id = r.criado_por
        WHERE (r.nome_completo ILIKE $1 OR r.nome_mae ILIKE $1 OR r.nome_pai ILIKE $1
           OR r.numero_termo ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1
           OR r.transcricao_completa ILIKE $1)
        ${livroFilter}
+       ${donoFilter}
        ORDER BY r.criado_em DESC
        LIMIT $2 OFFSET $3`,
       [like, parseInt(limit), offset]
@@ -40,7 +44,8 @@ router.get('/', exigePermissao('nascimento', 'ver'), async (req, res) => {
        WHERE (r.nome_completo ILIKE $1 OR r.nome_mae ILIKE $1 OR r.nome_pai ILIKE $1
           OR r.numero_termo ILIKE $1 OR CAST(r.ano AS TEXT) ILIKE $1
           OR r.transcricao_completa ILIKE $1)
-       ${livroFilter}`,
+       ${livroFilter}
+       ${donoFilter}`,
       [like]
     );
     res.json({
@@ -59,10 +64,12 @@ router.get('/', exigePermissao('nascimento', 'ver'), async (req, res) => {
 router.get('/:id', exigePermissao('nascimento', 'ver'), async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio
+      `SELECT r.*, l.numero AS livro_numero, l.cartorio AS livro_cartorio,
+              u.nome AS criado_por_nome
        FROM registros_nascimento r
        LEFT JOIN livros l ON l.id = r.livro_id
-       WHERE r.id = $1`,
+       LEFT JOIN usuarios u ON u.id = r.criado_por
+       WHERE r.id = $1 ${filtroDono(req.contexto, 'r')}`,
       [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
@@ -116,7 +123,7 @@ router.put('/:id', exigePermissao('nascimento', 'editar'), async (req, res) => {
         confianca=$12, observacoes=$13,
         transcricao_completa = CASE WHEN $14::boolean THEN $15::text ELSE transcricao_completa END,
         atualizado_em=NOW()
-       WHERE id=$16 RETURNING *`,
+       WHERE id=$16 ${filtroDono(req.contexto)} RETURNING *`,
       [
         f.livro_id ? parseInt(f.livro_id) : null,
         f.nome_completo, f.nome_mae, f.nome_pai, f.data_nascimento,
@@ -142,7 +149,8 @@ router.put('/:id', exigePermissao('nascimento', 'editar'), async (req, res) => {
 router.delete('/:id', exigePermissao('nascimento', 'excluir'), async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'DELETE FROM registros_nascimento WHERE id=$1 RETURNING arquivo_path, nome_completo', [req.params.id]
+      `DELETE FROM registros_nascimento WHERE id=$1 ${filtroDono(req.contexto)} RETURNING arquivo_path, nome_completo`,
+      [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     if (rows[0].arquivo_path) {
@@ -161,7 +169,8 @@ router.delete('/:id', exigePermissao('nascimento', 'excluir'), async (req, res) 
 router.post('/:id/localizar', exigePermissao('nascimento', 'editar'), async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT * FROM registros_nascimento WHERE id = $1', [req.params.id]
+      `SELECT * FROM registros_nascimento WHERE id = $1 ${filtroDono(req.contexto)}`,
+      [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Eye, Pencil, Trash2, FolderOpen, ChevronLeft, ChevronRight, X, BookOpen, ArrowLeft } from 'lucide-react';
 import { escriturasApi } from '../../api.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 import { useBulkSelection } from '../../components/useBulkSelection.js';
 import { BulkBar, SelectAllCheckbox, RowCheckbox } from '../../components/BulkBar.jsx';
 
@@ -26,7 +27,7 @@ function ConfidenceBadge({ value }) {
   );
 }
 
-function ViewModal({ record, onClose }) {
+function ViewModal({ record, onClose, isAdmin }) {
   if (!record) return null;
   const isImage = record.arquivo_tipo?.includes('image');
   const fields = [
@@ -91,6 +92,13 @@ function ViewModal({ record, onClose }) {
                   <ConfidenceBadge value={record.confianca} />
                 </div>
               )}
+
+              {isAdmin && (
+                <div className="col-span-2">
+                  <p className="text-xs text-slate-400 mb-0.5">Criado por</p>
+                  <p className="text-sm text-slate-600">{record.criado_por_nome || '—'}</p>
+                </div>
+              )}
             </div>
             {!isImage && record.arquivo_url && (
               <div className="mt-4 pt-4 border-t">
@@ -110,6 +118,7 @@ function ViewModal({ record, onClose }) {
 
 export default function EscriturasList() {
   const navigate      = useNavigate();
+  const { isAdmin }   = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const livroId   = searchParams.get('livro_id');
   const livroNome = searchParams.get('livro_nome');
@@ -174,7 +183,7 @@ export default function EscriturasList() {
   return (
     <div className="max-w-7xl mx-auto">
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-      {viewRecord && <ViewModal record={viewRecord} onClose={() => setViewRecord(null)} />}
+      {viewRecord && <ViewModal record={viewRecord} onClose={() => setViewRecord(null)} isAdmin={isAdmin} />}
 
       {livroId && (
         <div className="flex items-center gap-2 mb-4">
@@ -248,16 +257,17 @@ export default function EscriturasList() {
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-24">Livro</th>
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-20">Ano</th>
                 <th className="text-left px-4 py-3.5 font-semibold text-slate-600">Valor</th>
+                {isAdmin && <th className="text-left px-4 py-3.5 font-semibold text-slate-600 w-40">Usuário</th>}
                 <th className="text-right px-5 py-3.5 font-semibold text-slate-600 w-32">Ações</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={7} className="text-center py-12 text-slate-400">Carregando...</td></tr>
+                <tr><td colSpan={isAdmin ? 8 : 7} className="text-center py-12 text-slate-400">Carregando...</td></tr>
               )}
               {!loading && records.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="text-center py-12">
+                  <td colSpan={isAdmin ? 8 : 7} className="text-center py-12">
                     <p className="text-slate-400 text-sm">Nenhum registro encontrado</p>
                     {!search && (
                       <button onClick={() => navigate(novoUrl)}
@@ -285,6 +295,11 @@ export default function EscriturasList() {
                   <td className="px-4 py-3.5 text-slate-600">{r.livro || '—'}</td>
                   <td className="px-4 py-3.5 text-slate-600">{r.ano || '—'}</td>
                   <td className="px-4 py-3.5 text-slate-600 max-w-[200px] truncate">{r.valor || '—'}</td>
+                  {isAdmin && (
+                    <td className="px-4 py-3.5 text-slate-600">
+                      {r.criado_por_nome || <span className="text-slate-400 italic">—</span>}
+                    </td>
+                  )}
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-end gap-1.5">
                       {r.arquivo_url && (
